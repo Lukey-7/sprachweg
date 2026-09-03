@@ -1,0 +1,359 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id               String            @id @default(uuid())
+  email            String            @unique
+  name             String
+  avatarUrl        String?
+  activeLevel      String            @default("A1") // A0, A1, A2, B1_START, B1_SOLID, B2
+  currentWeek      Int               @default(1)
+  streakCount      Int               @default(0)
+  lastActiveAt     DateTime?
+  freezeTokens     Int               @default(2)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  settings         Settings?
+  cards            Card[]
+  reviews          Review[]
+  grammarProgress  GrammarProgress[]
+  sessions         Session[]
+  speakingSessions SpeakingSession[]
+  errorLogs        ErrorLog[]
+
+  @@map("users")
+}
+
+model Settings {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  dailyNewCards    Int      @default(20)
+  dailyReviewCap   Int      @default(100)
+  targetRetention  Float    @default(0.90) // 90% default FSRS retention
+  voiceSpeed       Float    @default(1.0)
+  ttsVoice         String   @default("de-DE-Wavenet-F")
+  theme            String   @default("system") // light, dark, system
+  autoPlayAudio    Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("settings")
+}
+
+model Word {
+  id                 String          @id @default(uuid())
+  lemma              String          @unique
+  normalizedLemma    String          // Lowercase without umlauts (ä->ae, ö->oe, ü->ue, ß->ss)
+  pos                String          // noun, verb, adjective, adverb, preposition, conjunction, pronoun, article, particle
+  gender             String?         // der, die, das, or null
+  cefrLevel          String          // A1, A2, B1, B2
+  frequencyRank      Int?
+  ipa                String?         // International Phonetic Alphabet string
+  audioUrl           String?
+  meaningEn          String          // Primary English definition
+  secondaryMeanings  String?         // JSON string array of alternative meanings
+  register           String?         // formal, informal, colloquial, technical
+  disambiguation     String?         // Semantic difference vs synonyms
+  falseFriends       String?         // English false-friend alerts
+  collocations       String?         // JSON string array of collocations
+  idioms             String?         // JSON string array of Redewendungen
+  isCompound         Boolean         @default(false)
+  compoundParts      String?         // JSON array of decompounded segments
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  forms              WordForm[]
+  cards              Card[]
+  sentenceTokens     SentenceToken[]
+
+  @@index([lemma])
+  @@index([normalizedLemma])
+  @@index([pos])
+  @@index([cefrLevel])
+  @@map("words")
+}
+
+model WordForm {
+  id                  String   @id @default(uuid())
+  wordId              String
+  form                String   // Inflected surface form (e.g. "Geschwindigkeiten", "fährst")
+  normalizedForm      String   // Normalized form for index lookup
+  formType            String   // conjugation, declension, comparative, superlative, plural
+  case                String?  // nominativ, akkusativ, dativ, genitiv
+  grammaticalNumber   String?  // singular, plural
+  gender              String?  // der, die, das
+  tense               String?  // praesens, praeteritum, perfekt, plusquamperfekt, futur_i
+  mood                String?  // indikativ, konjunktiv_i, konjunktiv_ii, imperativ
+  person              String?  // 1sg, 2sg, 3sg, 1pl, 2pl, 3pl
+  auxiliary           String?  // haben, sein
+  separablePrefix     String?  // e.g. "auf"
+  governedPreposition String?  // e.g. "auf" in "warten auf"
+  governedCase        String?  // akkusativ, dativ, genitiv
+  declensionCategory  String?  // strong, weak, mixed
+
+  word                Word     @relation(fields: [wordId], references: [id], onDelete: Cascade)
+
+  @@index([wordId])
+  @@index([form])
+  @@index([normalizedForm])
+  @@map("word_forms")
+}
+
+model Sentence {
+  id                 String          @id @default(uuid())
+  textDe             String
+  textEnNatural      String
+  textEnLiteral      String
+  cefrLevel          String          // A1, A2, B1, B2
+  audioUrl           String?
+  v2Position1        String          // Element in Vorfeld / Position 1
+  v2Verb             String          // Finite verb in Position 2
+  v2Mittelfeld       String          // Mittelfeld elements
+  v2VerbFinal        String?         // Rechte Satzklammer / Verb-Final
+  isNebensatz        Boolean         @default(false)
+  conjunctionTrigger String?         // weil, dass, wenn, etc.
+  grammarTags        String?         // JSON array of grammar tags
+  source             String?         // curriculum, mined, reader, gemini
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  tokens             SentenceToken[]
+  cards              Card[]
+
+  @@map("sentences")
+}
+
+model SentenceToken {
+  id                 String   @id @default(uuid())
+  sentenceId         String
+  tokenIndex         Int
+  surfaceToken       String   // Exact surface token
+  lemma              String   // Dictionary base form
+  pos                String   // noun, verb, adj, etc.
+  gender             String?  // der, die, das
+  case               String?  // nominativ, akkusativ, dativ, genitiv
+  syntaxRole         String?  // subject, direct_object, prep_object, etc.
+  declensionTrigger  String?  // Governing element
+  meaningEn          String?  // Contextual meaning
+  wordId             String?
+
+  sentence           Sentence @relation(fields: [sentenceId], references: [id], onDelete: Cascade)
+  word               Word?    @relation(fields: [wordId], references: [id], onDelete: SetNull)
+
+  @@index([sentenceId])
+  @@index([lemma])
+  @@map("sentence_tokens")
+}
+
+model Card {
+  id              String    @id @default(uuid())
+  userId          String
+  wordId          String?
+  sentenceId      String?
+  cardType        String    // recognition, production, sentence_cloze, audio_meaning, gender_drill, plural_drill
+  prompt          String    // Front content
+  answer          String    // Back content
+  contextSentence String?   // Full sentence context
+  optionsJson     String?   // JSON array of options for multiple-choice/drills
+  state           String    @default("new") // new, learning, review, relearning
+  stability       Float     @default(0.0)
+  difficulty      Float     @default(0.0)
+  elapsedDays     Float     @default(0.0)
+  scheduledDays   Float     @default(0.0)
+  reps            Int       @default(0)
+  lapses          Int       @default(0)
+  lastReview      DateTime?
+  dueAt           DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word            Word?     @relation(fields: [wordId], references: [id], onDelete: SetNull)
+  sentence        Sentence? @relation(fields: [sentenceId], references: [id], onDelete: SetNull)
+  reviews         Review[]
+
+  @@index([userId, dueAt])
+  @@index([userId, state])
+  @@index([userId, cardType])
+  @@map("cards")
+}
+
+model Review {
+  id               String   @id @default(uuid())
+  cardId           String
+  userId           String
+  rating           Int      // 1: Again, 2: Hard, 3: Good, 4: Easy
+  reviewType       String   // learning, review, relearning
+  elapsedDays      Float
+  scheduledDays    Float
+  stabilityBefore  Float
+  stabilityAfter   Float
+  difficultyBefore Float
+  difficultyAfter  Float
+  responseTimeMs   Int?
+  reviewedAt       DateTime @default(now())
+
+  card             Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, reviewedAt])
+  @@index([cardId])
+  @@map("reviews")
+}
+
+model GrammarTopic {
+  id                 String            @id @default(uuid())
+  slug               String            @unique
+  titleDe            String
+  titleEn            String
+  cefrLevel          String            // A1, A2, B1, B2
+  weekNumber         Int
+  orderIndex         Int
+  description        String
+  explanationMd      String            // Markdown guide & mental models
+  formulaPattern     String?           // Visual formula pattern
+  visualTableJson    String?           // JSON structured matrix
+  commonMistakesJson String?           // JSON array of pitfall comparisons
+  tagsJson           String            // JSON array of tags
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  progress           GrammarProgress[]
+  lessons            Lesson[]
+
+  @@index([slug])
+  @@index([cefrLevel])
+  @@index([weekNumber])
+  @@map("grammar_topics")
+}
+
+model GrammarProgress {
+  id               String       @id @default(uuid())
+  userId           String
+  topicId          String
+  masteryScore     Float        @default(0.0) // 0.0 to 1.0 (>= 0.80 is mastered)
+  timesPracticed   Int          @default(0)
+  correctCount     Int          @default(0)
+  errorCount       Int          @default(0)
+  lastPracticedAt  DateTime?
+  isRemedialActive Boolean      @default(false)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic            GrammarTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, topicId])
+  @@index([userId, isRemedialActive])
+  @@map("grammar_progress")
+}
+
+model Lesson {
+  id          String        @id @default(uuid())
+  topicId     String?
+  weekNumber  Int
+  dayNumber   Int           // 1 to 7
+  blockType   String        // warmup_srs, grammar_concept, sentence_miner, speaking_task, immersion_listening
+  title       String
+  contentJson String        // Structured lesson block payload
+  drillsJson  String?       // JSON array of 15 interactive drills
+  orderIndex  Int
+
+  topic       GrammarTopic? @relation(fields: [topicId], references: [id], onDelete: SetNull)
+
+  @@index([weekNumber, dayNumber])
+  @@index([blockType])
+  @@map("lessons")
+}
+
+model Session {
+  id                 String    @id @default(uuid())
+  userId             String
+  weekNumber         Int
+  dayNumber          Int
+  sessionType        String    @default("daily_5_block")
+  status             String    @default("in_progress") // in_progress, completed, abandoned
+  block1Done         Boolean   @default(false)
+  block2Done         Boolean   @default(false)
+  block3Done         Boolean   @default(false)
+  block4Done         Boolean   @default(false)
+  block5Done         Boolean   @default(false)
+  remedialDrillsJson String?   // Injected remedial drills for tags < 80%
+  score              Float?
+  durationSeconds    Int       @default(0)
+  startedAt          DateTime  @default(now())
+  completedAt        DateTime?
+
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startedAt])
+  @@index([userId, weekNumber, dayNumber])
+  @@map("sessions")
+}
+
+model SpeakingSession {
+  id                String   @id @default(uuid())
+  userId            String
+  sessionMode       String   // free_conversation, roleplay, pronunciation, shadowing, dictation
+  scenarioId        String?  // buergeramt, arzt, baeckerei, wohnung, interview
+  targetText        String?
+  transcript        String
+  audioUrl          String?
+  overallScore      Float    // 0 to 100
+  fluencyScore      Float?
+  accuracyScore     Float?
+  phonemeScoresJson String?  // JSON array of phoneme breakdown
+  successPointsJson String   // JSON array of 3 successes
+  correctionsJson   String   // JSON array of 3 prioritized corrections
+  minedWordsJson    String   // JSON array of 5 mined vocabulary entries
+  createdAt         DateTime @default(now())
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, sessionMode])
+  @@index([userId, createdAt])
+  @@map("speaking_sessions")
+}
+
+model ErrorLog {
+  id            String   @id @default(uuid())
+  userId        String
+  contextType   String   // drill, review, speaking, miner
+  inputValue    String
+  expectedValue String
+  errorType     String   // gender, case, conjugation, word_order, spelling, vocabulary
+  explanation   String
+  grammarTag    String?
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, grammarTag])
+  @@index([userId, errorType])
+  @@map("error_logs")
+}
+
+model CacheEntry {
+  id              String    @id @default(uuid())
+  cacheKey        String    @unique // Deterministic SHA-256 hash
+  cacheType       String    // dictionary, sentence_parse, drill_gen, speaking_eval, audio_meta
+  inputParamsJson String    // Serialized input parameters
+  payloadJson     String    // Validated response payload
+  hitCount        Int       @default(1)
+  expiresAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([cacheKey])
+  @@index([cacheType])
+  @@map("cache_entries")
+}

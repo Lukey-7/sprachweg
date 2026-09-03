@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-900 text-slate-100 antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
+}
+
+/* Tappable German token highlight */
+.de-token {
+  @apply cursor-pointer transition-all duration-150 inline-block px-1 py-0.5 rounded-md hover:bg-emerald-500/20 active:scale-95;
+}
+.de-token-der {
+  @apply text-blue-400 font-medium hover:bg-blue-500/20;
+}
+.de-token-die {
+  @apply text-rose-400 font-medium hover:bg-rose-500/20;
+}
+.de-token-das {
+  @apply text-emerald-400 font-medium hover:bg-emerald-500/20;
+}
+.de-token-plural {
+  @apply text-purple-400 font-medium hover:bg-purple-500/20;
+}
