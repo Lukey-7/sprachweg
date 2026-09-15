@@ -6,44 +6,41 @@ interface GermanQuickBarProps {
   className?: string;
 }
 
-export const GermanQuickBar: React.FC<GermanQuickBarProps> = ({ inputRef, onInsertChar, className = '' }) => {
-  const chars = ['ä', 'ö', 'ü', 'ß', 'Ä', 'Ö', 'Ü'];
+const CHARS = ['ä', 'ö', 'ü', 'ß', 'Ä', 'Ö', 'Ü'];
 
-  const handleInsert = (char: string) => {
-    if (onInsertChar) {
-      onInsertChar(char);
-      return;
-    }
+/** Inserts text at the caret of a React-controlled input so its onChange fires. */
+function insertAtCaret(el: HTMLInputElement | HTMLTextAreaElement, text: string) {
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? el.value.length;
+  const next = el.value.slice(0, start) + text + el.value.slice(end);
+  // React tracks the value via the prototype setter; assigning el.value directly
+  // is ignored and gets overwritten on the next render.
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, next);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.setSelectionRange(start + text.length, start + text.length);
+}
 
-    if (inputRef && inputRef.current) {
-      const el = inputRef.current;
-      const start = el.selectionStart ?? el.value.length;
-      const end = el.selectionEnd ?? el.value.length;
-      const val = el.value;
-
-      el.value = val.substring(0, start) + char + val.substring(end);
-      el.selectionStart = el.selectionEnd = start + char.length;
-      el.focus();
-
-      // Trigger standard React change event
-      const event = new Event('input', { bubbles: true });
-      el.dispatchEvent(event);
-    }
-  };
-
-  return (
-    <div className={`flex items-center gap-1.5 py-1.5 px-2 bg-slate-800/80 backdrop-blur rounded-xl border border-slate-700/60 shadow-inner overflow-x-auto ${className}`}>
-      <span className="text-[10px] uppercase font-bold text-slate-400 mr-1 select-none">DE:</span>
-      {chars.map((char) => (
-        <button
-          key={char}
-          type="button"
-          onClick={() => handleInsert(char)}
-          className="w-8 h-8 rounded-lg bg-slate-700/80 hover:bg-emerald-600 hover:text-white active:scale-90 transition-all font-semibold text-sm text-slate-100 flex items-center justify-center border border-slate-600/50 shadow-sm"
-        >
-          {char}
-        </button>
-      ))}
-    </div>
-  );
-};
+export const GermanQuickBar: React.FC<GermanQuickBarProps> = ({ inputRef, onInsertChar, className = '' }) => (
+  <div className={`flex items-center gap-1.5 overflow-x-auto ${className}`}>
+    {CHARS.map(char => (
+      <button
+        key={char}
+        type="button"
+        // Keep focus (and the mobile keyboard) on the input.
+        onPointerDown={e => e.preventDefault()}
+        onClick={() => {
+          if (onInsertChar) onInsertChar(char);
+          else if (inputRef?.current) {
+            inputRef.current.focus();
+            insertAtCaret(inputRef.current, char);
+          }
+        }}
+        className="shrink-0 w-11 h-11 rounded-xl bg-slate-800 active:bg-emerald-600 font-semibold text-lg text-slate-100 border border-slate-700"
+        aria-label={`Insert ${char}`}
+      >
+        {char}
+      </button>
+    ))}
+  </div>
+);

@@ -1,280 +1,217 @@
-import React, { useState, useRef } from 'react';
-import { Search, Sparkles, Volume2, Plus, Check, ArrowRight, Layers, HelpCircle } from 'lucide-react';
-import { SentenceAnalysis, SentenceToken, WordEntry } from '../types';
-import { ApiService } from '../services/api';
+import React, { useRef, useState } from 'react';
+import { BookOpen, Plus, Sparkles, Volume2 } from 'lucide-react';
+import { Card, SentenceAnalysis, SentenceToken, User } from '../types';
+import { api } from '../services/api';
 import { AudioService } from '../services/audio';
+import { useMarkBlockDone } from '../services/queries';
 import { GermanQuickBar } from '../components/GermanQuickBar';
 import { WordOrderMap } from '../components/WordOrderMap';
+import { ErrorPanel, MockNotice } from '../components/Feedback';
+
+type NewCard = Parameters<typeof api.addCard>[0];
 
 interface SentenceMinerViewProps {
+  user: User;
   onOpenWordLookup: (word: string) => void;
-  onAddCard: (cardData: any) => void;
+  onAddCard: (card: NewCard) => Promise<Card | null>;
 }
 
-export const SentenceMinerView: React.FC<SentenceMinerViewProps> = ({
-  onOpenWordLookup,
-  onAddCard
-}) => {
-  const [inputText, setInputText] = useState('Ich fahre heute mit dem Zug nach Berlin, weil ich einen Termin habe.');
+const SAMPLES = [
+  'Ich fahre heute mit dem Zug nach Berlin, weil ich einen Termin habe.',
+  'Die Verkäuferin gibt dem freundlichen Kunden das frische Brot.',
+  'Wenn das Wetter morgen schön ist, wandern wir in den Bergen.',
+];
+
+/** Replaces the first whole-word occurrence of `token` with a blank. */
+export function makeCloze(sentence: string, token: string): string | null {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(^|[^\\p{L}])${escaped}(?=$|[^\\p{L}])`, 'u');
+  if (!re.test(sentence)) return null;
+  return sentence.replace(re, (_m, before) => `${before}___`);
+}
+
+const tokenClass = (t: SentenceToken) => {
+  if (t.gender === 'der') return 'text-blue-300 bg-blue-500/10 border-blue-500/40';
+  if (t.gender === 'die') return 'text-rose-300 bg-rose-500/10 border-rose-500/40';
+  if (t.gender === 'das') return 'text-emerald-300 bg-emerald-500/10 border-emerald-500/40';
+  if (t.pos === 'verb') return 'text-amber-300 bg-amber-500/10 border-amber-500/40';
+  return 'text-slate-200 border-slate-700';
+};
+
+export const SentenceMinerView: React.FC<SentenceMinerViewProps> = ({ user, onOpenWordLookup, onAddCard }) => {
+  const [input, setInput] = useState('');
+  const [result, setResult] = useState<{ analysis: SentenceAnalysis; mock: boolean } | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [analysis, setAnalysis] = useState<SentenceAnalysis | null>(null);
-  const [selectedToken, setSelectedToken] = useState<SentenceToken | null>(null);
-  const [addedCloze, setAddedCloze] = useState(false);
+  const [selected, setSelected] = useState<SentenceToken | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const markDone = useMarkBlockDone();
 
-  const sampleSentences = [
-    'Ich fahre heute mit dem Zug nach Berlin, weil ich einen Termin habe.',
-    'Die Verkäuferin gibt dem freundlichen Kunden das frische Brot.',
-    'Auf vielen Abschnitten der Autobahn gilt keine Geschwindigkeitsbegrenzung.',
-    'Wenn das Wetter morgen schön ist, wandern wir in den Bergen.'
-  ];
-
-  const handleAnalyze = async (sentenceToAnalyze?: string) => {
-    const text = (sentenceToAnalyze || inputText).trim();
-    if (!text) return;
+  const analyze = async (text = input) => {
+    const sentence = text.trim();
+    if (!sentence) return;
     setIsLoading(true);
-    setSelectedToken(null);
+    setError(null);
+    setSelected(null);
     try {
-      const result = await ApiService.analyzeSentence(text);
-      setAnalysis(result);
-      AudioService.playFeedbackSound('click');
+      const { data, mock } = await api.analyzeSentence(sentence, user.activeLevel);
+      setResult({ analysis: data, mock });
+      if (!mock) markDone(3);
     } catch (e) {
-      console.error(e);
+      setResult(null);
+      setError(e);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleAddClozeCard = () => {
-    if (!analysis) return;
-    onAddCard({
-      cardType: 'sentence_cloze',
-      prompt: analysis.textDe.replace('Zug', '___'),
-      answer: 'Zug',
-      contextSentence: analysis.textDe,
-    });
-    setAddedCloze(true);
-    AudioService.playFeedbackSound('correct');
-    setTimeout(() => setAddedCloze(false), 2500);
-  };
-
-  const getTokenColorClass = (token: SentenceToken) => {
-    if (token.gender === 'der') return 'text-blue-400 font-semibold border-b-2 border-blue-500/40 bg-blue-500/10';
-    if (token.gender === 'die') return 'text-rose-400 font-semibold border-b-2 border-rose-500/40 bg-rose-500/10';
-    if (token.gender === 'das') return 'text-emerald-400 font-semibold border-b-2 border-emerald-500/40 bg-emerald-500/10';
-    if (token.pos === 'verb') return 'text-amber-300 font-semibold border-b-2 border-amber-500/40 bg-amber-500/10';
-    return 'text-slate-200 border-b border-slate-700 hover:bg-slate-800';
-  };
+  const analysis = result?.analysis;
+  const cloze = analysis && selected ? makeCloze(analysis.textDe, selected.surfaceToken.replace(/[.,!?;:"„“]/g, '')) : null;
 
   return (
-    <div className="space-y-6 pb-12 animate-in fade-in duration-300">
-      {/* Header Banner */}
-      <div className="bg-slate-900 p-5 sm:p-6 rounded-3xl border border-slate-800 shadow-xl">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
-            <Search className="w-5 h-5" />
+    <div className="space-y-4 pb-4">
+      <section className="bg-slate-900 p-4 rounded-3xl border border-slate-800 space-y-3">
+        <p className="text-sm text-slate-400">Paste any German sentence to see how it's built.</p>
+        <textarea
+          ref={inputRef}
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          placeholder="z. B. Ich fahre heute mit dem Zug nach Berlin."
+          rows={3}
+          lang="de"
+          autoCapitalize="sentences"
+          spellCheck={false}
+          className="w-full bg-slate-950 p-3.5 rounded-2xl border border-slate-700 text-base text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
+        />
+        <GermanQuickBar inputRef={inputRef} />
+        <button
+          onClick={() => analyze()}
+          disabled={isLoading || !input.trim()}
+          className="w-full min-h-[52px] rounded-2xl bg-emerald-500 disabled:opacity-40 text-slate-950 font-bold text-base flex items-center justify-center gap-2"
+        >
+          <Sparkles className="w-5 h-5" /> {isLoading ? 'Analyzing…' : 'Analyze'}
+        </button>
+        {!result && !isLoading && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-bold text-slate-500">Or try one:</span>
+            {SAMPLES.map(s => (
+              <button
+                key={s}
+                onClick={() => {
+                  setInput(s);
+                  analyze(s);
+                }}
+                className="text-left text-sm px-3 py-2.5 rounded-xl bg-slate-800/70 text-slate-300 active:bg-slate-800"
+              >
+                {s}
+              </button>
+            ))}
           </div>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-black text-white">Sentence Miner</h1>
-            <p className="text-xs text-slate-400">Paste, type, or speak any German sentence for full grammatical teardown</p>
-          </div>
-        </div>
+        )}
+      </section>
 
-        {/* Text Input Area */}
-        <div className="mt-4 space-y-2">
-          <div className="relative">
-            <textarea
-              ref={inputRef}
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Paste any German sentence here..."
-              rows={3}
-              className="w-full bg-slate-950 p-3.5 rounded-2xl border border-slate-700/80 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all resize-none"
-            />
-          </div>
+      {error != null && <ErrorPanel title="Couldn't analyze that sentence" error={error} onRetry={() => analyze()} />}
 
-          {/* German Umlauts Quick Bar */}
-          <GermanQuickBar inputRef={inputRef} />
+      {analysis && result && (
+        <section className="bg-slate-900 p-4 rounded-3xl border border-slate-800 space-y-4">
+          {result.mock && <MockNotice />}
 
-          {/* Action Row */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-            <div className="flex flex-wrap gap-1.5">
-              {sampleSentences.map((s, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => {
-                    setInputText(s);
-                    handleAnalyze(s);
-                  }}
-                  className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 transition-colors"
-                >
-                  Example {idx + 1}
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={() => handleAnalyze()}
-              disabled={isLoading || !inputText.trim()}
-              className="py-2.5 px-6 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-extrabold text-xs shadow-lg transition-all flex items-center gap-2 ml-auto"
-            >
-              {isLoading ? (
-                <>Analyzing linguistics...</>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4" /> Deconstruct Sentence
-                </>
-              )}
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Tap a word</span>
+            <button onClick={() => AudioService.playGermanText(analysis.textDe)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 text-emerald-400 text-sm font-semibold">
+              <Volume2 className="w-4 h-4" /> Listen
             </button>
           </div>
-        </div>
-      </div>
 
-      {/* Analysis Results */}
-      {analysis && (
-        <div className="space-y-4 animate-in slide-in-from-bottom-3 duration-300">
-          {/* Main Sentence Breakdown */}
-          <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-xl space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Interactive Token Breakdown
-                </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  CEFR {analysis.cefrLevel}
-                </span>
-              </div>
+          <div className="flex flex-wrap gap-2 text-lg font-medium">
+            {analysis.tokens.map(t => (
               <button
-                onClick={() => AudioService.playGermanText(analysis.textDe)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-750 text-emerald-400 text-xs font-medium transition-colors"
+                key={t.tokenIndex}
+                onClick={() => setSelected(t)}
+                className={`px-2.5 py-1.5 rounded-xl border-b-2 ${tokenClass(t)} ${selected?.tokenIndex === t.tokenIndex ? 'ring-2 ring-emerald-400' : ''}`}
               >
-                <Volume2 className="w-4 h-4" /> Listen
+                {t.surfaceToken}
               </button>
-            </div>
-
-            {/* Interactive Token Stream */}
-            <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800/80 flex flex-wrap gap-2 items-center text-lg sm:text-xl font-medium">
-              {analysis.tokens.map((token, idx) => (
-                <span
-                  key={idx}
-                  onClick={() => setSelectedToken(token)}
-                  className={`de-token px-2 py-1 rounded-xl cursor-pointer transition-all ${getTokenColorClass(token)} ${
-                    selectedToken?.tokenIndex === token.tokenIndex ? 'ring-2 ring-emerald-400 scale-105' : ''
-                  }`}
-                  title="Click for deep grammatical teardown"
-                >
-                  {token.surfaceToken}
-                </span>
-              ))}
-            </div>
-
-            {/* Token Detail Sheet (When Tapped) */}
-            {selectedToken && (
-              <div className="p-4 bg-slate-950/90 rounded-2xl border border-emerald-500/30 animate-in fade-in duration-200">
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg font-black text-white">{selectedToken.surfaceToken}</span>
-                      <span className="text-xs text-slate-400">→ Lemma: <strong className="text-slate-200">{selectedToken.lemma}</strong></span>
-                      {selectedToken.gender && (
-                        <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                          {selectedToken.gender}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-slate-300 mt-1">
-                      Role in this sentence: <strong className="text-emerald-400">{selectedToken.syntaxRole || selectedToken.pos}</strong>
-                      {selectedToken.case && <span> • Case: <strong className="capitalize text-amber-300">{selectedToken.case}</strong></span>}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => onOpenWordLookup(selectedToken.lemma)}
-                    className="py-1.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-bold border border-slate-700 flex items-center gap-1.5"
-                  >
-                    Deep Dictionary
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Translations Comparison */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-              <div className="p-3.5 bg-slate-950/60 rounded-2xl border border-slate-800">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
-                  Natural English Translation
-                </div>
-                <div className="text-sm font-medium text-slate-100">{analysis.textEnNatural}</div>
-              </div>
-
-              <div className="p-3.5 bg-slate-950/60 rounded-2xl border border-slate-800">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-amber-400 mb-1">
-                  Literal Pedagogical Translation
-                </div>
-                <div className="text-sm font-medium text-slate-300 italic">{analysis.textEnLiteral}</div>
-              </div>
-            </div>
-
-            {/* Satzklammer Word Order Map */}
-            <WordOrderMap
-              pos1={analysis.v2Position1}
-              verb2={analysis.v2Verb}
-              mittelfeld={analysis.v2Mittelfeld}
-              verbFinal={analysis.v2VerbFinal}
-              isNebensatz={analysis.isNebensatz}
-            />
-
-            {/* Add to Deck Quick Actions */}
-            <div className="pt-2 flex flex-wrap gap-2">
-              <button
-                onClick={handleAddClozeCard}
-                disabled={addedCloze}
-                className={`py-2.5 px-4 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
-                  addedCloze
-                    ? 'bg-emerald-600 text-white'
-                    : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow'
-                }`}
-              >
-                {addedCloze ? (
-                  <>
-                    <Check className="w-4 h-4" /> Added Sentence Cloze to FSRS!
-                  </>
-                ) : (
-                  <>
-                    <Plus className="w-4 h-4" /> Add Sentence Cloze Card
-                  </>
-                )}
-              </button>
-            </div>
+            ))}
           </div>
 
-          {/* Calibrated Variations */}
-          {analysis.variations && analysis.variations.length > 0 && (
-            <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-xl space-y-3">
-              <h3 className="text-sm font-black text-slate-100 flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-emerald-400" />
-                CEFR-Calibrated Sentence Variations
-              </h3>
-              <div className="space-y-2">
-                {analysis.variations.map((v, i) => (
-                  <div key={i} className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-semibold text-slate-200 text-sm">{v.de}</div>
-                      <div className="text-xs text-slate-400 mt-0.5">{v.en}</div>
-                      <div className="text-[11px] text-emerald-400/80 mt-1">💡 {v.note}</div>
-                    </div>
-                    <button
-                      onClick={() => AudioService.playGermanText(v.de)}
-                      className="text-slate-400 hover:text-emerald-400 p-1"
-                    >
-                      <Volume2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
+          {selected && (
+            <div className="p-4 bg-slate-950 rounded-2xl border border-emerald-500/30 space-y-3">
+              <div>
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="text-xl font-black text-white">{selected.surfaceToken}</span>
+                  {selected.lemma && selected.lemma !== selected.surfaceToken && <span className="text-sm text-slate-400">from {selected.lemma}</span>}
+                </div>
+                <p className="text-sm text-slate-300 mt-1">
+                  {selected.meaningEn && <strong className="text-slate-100">{selected.meaningEn}</strong>}
+                  {selected.pos && <span> · {selected.pos}</span>}
+                  {selected.gender && <span> · {selected.gender}</span>}
+                  {selected.case && <span className="capitalize"> · {selected.case}</span>}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => onOpenWordLookup(selected.lemma || selected.surfaceToken)}
+                  className="min-h-[44px] rounded-xl bg-slate-800 text-slate-100 text-sm font-bold flex items-center justify-center gap-1.5"
+                >
+                  <BookOpen className="w-4 h-4" /> Dictionary
+                </button>
+                <button
+                  disabled={!cloze || result.mock}
+                  onClick={() =>
+                    cloze &&
+                    onAddCard({
+                      cardType: 'sentence_cloze',
+                      prompt: cloze,
+                      answer: selected.surfaceToken.replace(/[.,!?;:"„“]/g, ''),
+                      contextSentence: analysis.textDe,
+                    })
+                  }
+                  className="min-h-[44px] rounded-xl bg-emerald-500 disabled:opacity-40 text-slate-950 text-sm font-bold flex items-center justify-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" /> Cloze card
+                </button>
               </div>
             </div>
           )}
-        </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="p-3 bg-slate-950/60 rounded-2xl border border-slate-800">
+              <div className="text-xs font-bold uppercase text-emerald-400 mb-1">Meaning</div>
+              <div className="text-[15px] text-slate-100">{analysis.textEnNatural}</div>
+            </div>
+            <div className="p-3 bg-slate-950/60 rounded-2xl border border-slate-800">
+              <div className="text-xs font-bold uppercase text-amber-400 mb-1">Word for word</div>
+              <div className="text-[15px] text-slate-300 italic">{analysis.textEnLiteral}</div>
+            </div>
+          </div>
+
+          <WordOrderMap
+            pos1={analysis.v2Position1}
+            verb2={analysis.v2Verb}
+            mittelfeld={analysis.v2Mittelfeld}
+            verbFinal={analysis.v2VerbFinal}
+            isNebensatz={analysis.isNebensatz}
+          />
+
+          {analysis.variations.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Variations</h3>
+              {analysis.variations.map((v, i) => (
+                <div key={i} className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-slate-100">{v.de}</div>
+                    <div className="text-sm text-slate-400">{v.en}</div>
+                    {v.note && <div className="text-xs text-emerald-400/80 mt-1">{v.note}</div>}
+                  </div>
+                  <button onClick={() => AudioService.playGermanText(v.de)} className="p-2 text-slate-400" aria-label="Listen">
+                    <Volume2 className="w-5 h-5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       )}
     </div>
   );

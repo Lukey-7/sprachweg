@@ -1,388 +1,363 @@
-import { Card, CEFRLevel, DailySession, GrammarTopic, GradedStory, SentenceAnalysis, SpeakingDebrief, User, WordEntry } from '../types';
-import { SEED_DICTIONARY, SEED_STORIES, SEED_TOPICS } from './seedData';
+import {
+  Card,
+  CEFRLevel,
+  DailySession,
+  DashboardStats,
+  GrammarProgress,
+  GrammarTopic,
+  GradedStory,
+  ReviewPreview,
+  SentenceAnalysis,
+  SpeakingDebrief,
+  User,
+  WordEntry,
+} from '../types';
 
 const BASE_URL = '/api';
 
-export class ApiService {
-  private static user: User = {
-    id: 'user-001',
-    email: 'learner@sprachweg.app',
-    name: 'Elena Rostova',
-    activeLevel: 'A1',
-    currentWeek: 1,
-    streakCount: 7,
-    freezeTokens: 2,
-    settings: {
-      dailyNewCards: 20,
-      dailyReviewCap: 100,
-      targetRetention: 0.90,
-      voiceSpeed: 1.0,
-      ttsVoice: 'de-DE-Standard-A',
-      theme: 'dark',
-      autoPlayAudio: true,
-    }
-  };
-
-  private static cards: Card[] = [
-    {
-      id: 'card-1',
-      userId: 'user-001',
-      cardType: 'recognition',
-      prompt: 'der Tisch',
-      answer: 'the table',
-      contextSentence: 'Der Tisch ist sehr groß.',
-      state: 'review',
-      stability: 3.2,
-      difficulty: 4.8,
-      elapsedDays: 2.1,
-      scheduledDays: 3.0,
-      reps: 2,
-      lapses: 0,
-      dueAt: new Date(Date.now() - 3600000).toISOString(),
-    },
-    {
-      id: 'card-2',
-      userId: 'user-001',
-      cardType: 'production',
-      prompt: 'the speed limit',
-      answer: 'die Geschwindigkeitsbegrenzung',
-      contextSentence: 'Hier gilt eine Geschwindigkeitsbegrenzung von 50 km/h.',
-      state: 'learning',
-      stability: 1.5,
-      difficulty: 6.2,
-      elapsedDays: 1.0,
-      scheduledDays: 1.0,
-      reps: 1,
-      lapses: 0,
-      dueAt: new Date(Date.now() - 1800000).toISOString(),
-    },
-    {
-      id: 'card-3',
-      userId: 'user-001',
-      cardType: 'sentence_cloze',
-      prompt: 'Ich fahre jeden Tag mit ___ Zug zur Arbeit.',
-      answer: 'dem',
-      options: ['dem', 'den', 'der', 'das'],
-      contextSentence: 'Ich fahre jeden Tag mit dem Zug zur Arbeit.',
-      state: 'new',
-      stability: 0.0,
-      difficulty: 5.0,
-      elapsedDays: 0,
-      scheduledDays: 0,
-      reps: 0,
-      lapses: 0,
-      dueAt: new Date().toISOString(),
-    },
-    {
-      id: 'card-4',
-      userId: 'user-001',
-      cardType: 'gender_drill',
-      prompt: '___ Bäckerei (bakery)',
-      answer: 'die',
-      options: ['der', 'die', 'das'],
-      state: 'new',
-      stability: 0.0,
-      difficulty: 5.0,
-      elapsedDays: 0,
-      scheduledDays: 0,
-      reps: 0,
-      lapses: 0,
-      dueAt: new Date().toISOString(),
-    }
-  ];
-
-  static async getUser(): Promise<User> {
-    try {
-      const res = await fetch(`${BASE_URL}/users/me`);
-      if (res.ok) return await res.json();
-    } catch (_) {}
-    return this.user;
+/** A failed API call. `status` is 0 when the request never reached the server. */
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+    this.name = 'ApiError';
   }
 
-  static async analyzeSentence(text: string): Promise<SentenceAnalysis> {
-    try {
-      const res = await fetch(`${BASE_URL}/miner/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sentence: text, cefrLevel: this.user.activeLevel })
-      });
-      if (res.ok) {
-        const raw = await res.json();
-        const a = raw.analysis || raw;
-        if (a && (a.tokens || a.textDe || a.sentenceDe)) {
-          return {
-            id: a.id || `sent-${Date.now()}`,
-            textDe: a.textDe || a.sentenceDe || text,
-            textEnNatural: a.textEnNatural || a.sentenceEnNatural || '',
-            textEnLiteral: a.textEnLiteral || a.sentenceEnLiteral || '',
-            cefrLevel: a.cefrLevel || 'A2',
-            v2Position1: a.topologicalMap?.vorfeld || a.v2Position1 || '',
-            v2Verb: a.topologicalMap?.linkeSatzklammer || a.v2Verb || '',
-            v2Mittelfeld: a.topologicalMap?.mittelfeld || a.v2Mittelfeld || '',
-            v2VerbFinal: a.topologicalMap?.rechteSatzklammer || a.v2VerbFinal || '',
-            isNebensatz: !!a.isNebensatz,
-            conjunctionTrigger: a.conjunctionTrigger,
-            grammarTags: a.grammarTags || [],
-            tokens: (a.tokens || []).map((t: any, idx: number) => ({
-              tokenIndex: idx,
-              surfaceToken: t.surfaceToken || t.token || '',
-              lemma: t.lemma || t.token || '',
-              pos: (t.pos || 'OTHER').toLowerCase(),
-              gender: t.gender ? t.gender.toLowerCase() : null,
-              case: t.case ? t.case.toLowerCase() : null,
-              syntaxRole: t.syntaxRole || '',
-              declensionTrigger: t.declensionTrigger,
-              meaningEn: t.meaningEn || t.literalGlossEn || '',
-            })),
-            variations: (a.variations || []).map((v: any) => ({
-              de: v.textDe || v.de || '',
-              en: v.textEn || v.en || '',
-              note: v.level || v.note || 'Variation',
-            })),
-          };
-        }
-      }
-    } catch (_) {}
-
-    // Robust offline / fallback parser
-    return this.fallbackSentenceAnalysis(text);
+  /** The AI backend (Gemini) was unreachable or rejected the request. */
+  get isAiUnavailable() {
+    return this.status === 503;
   }
 
-  static async lookupWord(query: string): Promise<WordEntry | null> {
-    const clean = query.trim().toLowerCase();
-    const normalized = clean.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
-
-    // 1. Check seed dictionary first
-    if (SEED_DICTIONARY[normalized]) return SEED_DICTIONARY[normalized];
-    if (SEED_DICTIONARY[clean]) return SEED_DICTIONARY[clean];
-
-    // 2. Fetch from backend API
-    try {
-      const res = await fetch(`${BASE_URL}/dictionary/lookup?q=${encodeURIComponent(clean)}`);
-      if (res.ok) {
-        const data = await res.json();
-        const w = data.word || data;
-        if (w) {
-          if (typeof w.compoundParts === 'string') {
-            try { w.compoundParts = JSON.parse(w.compoundParts); } catch (_) {}
-          }
-          return w;
-        }
-      }
-    } catch (_) {}
-
-    // Generic morphological fallback
-    return {
-      id: `word-${clean}`,
-      lemma: query,
-      normalizedLemma: normalized,
-      pos: 'noun',
-      gender: query.startsWith('der ') ? 'der' : query.startsWith('die ') ? 'die' : query.startsWith('das ') ? 'das' : null,
-      cefrLevel: 'A1',
-      ipa: `[${query}]`,
-      meaningEn: `Translation for "${query}"`,
-      examples: [
-        { de: `Das ist ein Beispiel mit ${query}.`, en: `This is an example with ${query}.` }
-      ]
-    };
-  }
-
-  static async getDueCards(): Promise<Card[]> {
-    try {
-      const res = await fetch(`${BASE_URL}/cards/due`);
-      if (res.ok) return await res.json();
-    } catch (_) {}
-    return this.cards;
-  }
-
-  static async submitReview(cardId: string, rating: 1 | 2 | 3 | 4): Promise<Card> {
-    const card = this.cards.find(c => c.id === cardId);
-    if (!card) throw new Error('Card not found');
-
-    // FSRS simplified state transition
-    const intervalMap = { 1: 0.1, 2: 1.2, 3: 3.5, 4: 7.0 };
-    card.scheduledDays = intervalMap[rating];
-    card.stability = Math.max(0.1, card.stability + (rating - 2) * 1.2);
-    card.difficulty = Math.max(1, Math.min(10, card.difficulty - (rating - 3) * 0.5));
-    card.reps += 1;
-    card.state = 'review';
-    card.lastReview = new Date().toISOString();
-    card.dueAt = new Date(Date.now() + card.scheduledDays * 86400000).toISOString();
-
-    try {
-      await fetch(`${BASE_URL}/cards/${cardId}/review`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rating })
-      });
-    } catch (_) {}
-
-    return card;
-  }
-
-  static async addCardToDeck(card: Partial<Card>): Promise<Card> {
-    const newCard: Card = {
-      id: `card-${Date.now()}`,
-      userId: this.user.id,
-      cardType: card.cardType || 'recognition',
-      prompt: card.prompt || '',
-      answer: card.answer || '',
-      contextSentence: card.contextSentence,
-      options: card.options,
-      state: 'new',
-      stability: 0,
-      difficulty: 5,
-      elapsedDays: 0,
-      scheduledDays: 0,
-      reps: 0,
-      lapses: 0,
-      dueAt: new Date().toISOString(),
-    };
-    this.cards.push(newCard);
-
-    try {
-      await fetch(`${BASE_URL}/cards`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newCard)
-      });
-    } catch (_) {}
-
-    return newCard;
-  }
-
-  static async getCurriculumTopics(): Promise<GrammarTopic[]> {
-    try {
-      const res = await fetch(`${BASE_URL}/curriculum/topics`);
-      if (res.ok) return await res.json();
-    } catch (_) {}
-    return SEED_TOPICS;
-  }
-
-  static async getGradedStories(): Promise<GradedStory[]> {
-    return SEED_STORIES;
-  }
-
-  static async evaluateSpeaking(
-    mode: string,
-    scenarioId: string,
-    transcript: string,
-    targetText?: string
-  ): Promise<SpeakingDebrief> {
-    try {
-      const res = await fetch(`${BASE_URL}/speaking/evaluate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode, scenarioId, transcript, targetText })
-      });
-      if (res.ok) return await res.json();
-    } catch (_) {}
-
-    // Standard 3-3-5 debrief protocol
-    return {
-      overallScore: 88,
-      fluencyScore: 85,
-      accuracyScore: 91,
-      phonemeScores: [
-        { phoneme: 'ü / ö', score: 92, label: 'Front Rounded Vowels', tip: 'Great lip rounding on "über" and "hören"!' },
-        { phoneme: 'ch (ich-Laut)', score: 84, label: 'Palatal Fricative', tip: 'Keep tongue close to the hard palate for "ich" and "möchte".' },
-        { phoneme: 'r (uvular)', score: 86, label: 'Uvular Fricative', tip: 'Vibrate gently at the back of the throat.' },
-        { phoneme: 'Auslautverhärtung', score: 95, label: 'Final Devoicing', tip: 'Clean unvoiced "t" sound at the end of "Hund".' }
-      ],
-      successPoints: [
-        'Accurately placed the auxiliary verb in Position 2 and participle at clause end.',
-        'Used polite modal subjunctive (Könnten Sie...) effectively.',
-        'Maintained natural conversational tempo without unnatural pauses.'
-      ],
-      corrections: [
-        {
-          learnerSaid: 'Ich warte für den Bus.',
-          nativeRecast: 'Ich warte auf den Bus.',
-          rule: 'The verb "warten" governs the preposition "auf + Akkusativ", not "für".'
-        },
-        {
-          learnerSaid: 'Weil ich habe keine Zeit.',
-          nativeRecast: 'Weil ich keine Zeit habe.',
-          rule: 'Subordinating conjunction "weil" kicks the finite verb to the very end of the clause.'
-        },
-        {
-          learnerSaid: 'Das Mann ist nett.',
-          nativeRecast: 'Der Mann ist nett.',
-          rule: 'Mann is masculine singular in the Nominative case (der Mann).'
-        }
-      ],
-      minedWords: [
-        { word: 'die Wohnungsgeberbestätigung', pos: 'noun', gender: 'die', meaning: 'landlord confirmation of residence' },
-        { word: 'die Meldebescheinigung', pos: 'noun', gender: 'die', meaning: 'official registration certificate' },
-        { word: 'beantragen', pos: 'verb', meaning: 'to apply for officially' },
-        { word: 'vorlegen', pos: 'verb', meaning: 'to present / submit documents' },
-        { word: 'erforderlich', pos: 'adjective', meaning: 'mandatory / required' }
-      ]
-    };
-  }
-
-  private static fallbackSentenceAnalysis(text: string): SentenceAnalysis {
-    const rawTokens = text.trim().split(/\s+/);
-    const tokens: any[] = rawTokens.map((t, idx) => {
-      const clean = t.replace(/[.,!?;:"„“]/g, '');
-      const lower = clean.toLowerCase();
-
-      let pos = 'word';
-      let gender: any = null;
-      let caseRole: any = null;
-      let syntaxRole = 'element';
-      let meaning = clean;
-
-      if (['der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einen', 'einem', 'einer'].includes(lower)) {
-        pos = 'article';
-        if (['der', 'den', 'dem', 'des'].includes(lower)) gender = 'der';
-        if (['die', 'der', 'einer'].includes(lower)) gender = 'die';
-        if (['das', 'dem', 'des'].includes(lower)) gender = 'das';
-        if (lower === 'den' || lower === 'einen') caseRole = 'akkusativ';
-        if (lower === 'dem' || lower === 'einem') caseRole = 'dativ';
-      } else if (/^[A-ZÄÖÜ]/.test(clean)) {
-        pos = 'noun';
-        if (['mann', 'hund', 'tisch', 'bus', 'zug', 'apfel'].includes(lower)) gender = 'der';
-        else if (['frau', 'straße', 'wohnung', 'bäckerei', 'geschwindigkeitsbegrenzung'].includes(lower)) gender = 'die';
-        else if (['kind', 'buch', 'brot', 'auto', 'haus'].includes(lower)) gender = 'das';
-        else gender = 'der';
-      } else if (['bin', 'bist', 'ist', 'sind', 'seid', 'habe', 'hast', 'hat', 'haben', 'fahrt', 'fahren', 'warte', 'warten'].includes(lower)) {
-        pos = 'verb';
-        syntaxRole = 'finite_verb';
-      }
-
-      return {
-        tokenIndex: idx,
-        surfaceToken: t,
-        lemma: clean,
-        pos,
-        gender,
-        case: caseRole,
-        syntaxRole,
-        meaningEn: meaning
-      };
-    });
-
-    const isNebensatz = text.toLowerCase().includes('weil') || text.toLowerCase().includes('dass') || text.toLowerCase().includes('wenn');
-
-    return {
-      textDe: text,
-      textEnNatural: 'I am traveling by train to Berlin today because I have an appointment.',
-      textEnLiteral: 'I travel today with the train to Berlin, because I an appointment have.',
-      cefrLevel: 'A2',
-      v2Position1: rawTokens[0] || 'Ich',
-      v2Verb: rawTokens[1] || 'fahre',
-      v2Mittelfeld: rawTokens.slice(2, -1).join(' '),
-      v2VerbFinal: isNebensatz ? rawTokens[rawTokens.length - 1] : undefined,
-      isNebensatz,
-      conjunctionTrigger: isNebensatz ? 'weil' : undefined,
-      grammarTags: ['satzklammer', 'dativ', 'nebensatz'],
-      tokens,
-      variations: [
-        { de: 'Er fährt morgen mit dem Zug nach München.', en: 'He travels tomorrow by train to Munich.', note: 'Subject variation with 3rd person singular verb form.' },
-        { de: 'Wir sind gestern mit dem Zug gefahren.', en: 'We traveled by train yesterday.', note: 'Perfekt past tense with auxiliary "sein".' },
-        { de: 'Fährst du oft mit der Bahn?', en: 'Do you often travel by rail?', note: 'V1 question syntax.' }
-      ]
-    };
+  get isOffline() {
+    return this.status === 0;
   }
 }
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        // Lets the server compute "today" and streaks in the learner's timezone.
+        'x-tz-offset': String(new Date().getTimezoneOffset()),
+        ...init.headers,
+      },
+    });
+  } catch {
+    throw new ApiError(navigator.onLine ? 'Could not reach the server.' : 'You are offline.', 0);
+  }
+
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const detail = body?.message || body?.error || res.statusText;
+    throw new ApiError(detail, res.status);
+  }
+  return body as T;
+}
+
+const post = <T>(path: string, data?: unknown) =>
+  request<T>(path, { method: 'POST', body: data === undefined ? undefined : JSON.stringify(data) });
+
+const patch = <T>(path: string, data: unknown) =>
+  request<T>(path, { method: 'PATCH', body: JSON.stringify(data) });
+
+/** Parses a JSON-string column, tolerating null and already-parsed values. */
+function parseJson<T>(value: unknown, fallback: T): T {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value !== 'string') return value as T;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+// ── Mappers: server rows → app types ──────────────────────────────────────
+
+export function toUser(row: any): User {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    activeLevel: row.activeLevel,
+    currentWeek: row.currentWeek,
+    streakCount: row.streakCount,
+    freezeTokens: row.freezeTokens,
+    settings: row.settings ?? undefined,
+  };
+}
+
+export function toCard(row: any): Card {
+  return {
+    id: row.id,
+    userId: row.userId,
+    wordId: row.wordId ?? undefined,
+    sentenceId: row.sentenceId ?? undefined,
+    cardType: row.cardType,
+    prompt: row.prompt,
+    answer: row.answer,
+    contextSentence: row.contextSentence ?? undefined,
+    options: parseJson<string[] | undefined>(row.optionsJson, undefined),
+    state: row.state,
+    stability: row.stability,
+    difficulty: row.difficulty,
+    elapsedDays: row.elapsedDays,
+    scheduledDays: row.scheduledDays,
+    reps: row.reps,
+    lapses: row.lapses,
+    lastReview: row.lastReview ?? undefined,
+    dueAt: row.dueAt,
+  };
+}
+
+export function toTopic(row: any): GrammarTopic {
+  return {
+    id: row.id,
+    slug: row.slug,
+    titleDe: row.titleDe,
+    titleEn: row.titleEn,
+    cefrLevel: row.cefrLevel,
+    weekNumber: row.weekNumber,
+    orderIndex: row.orderIndex,
+    description: row.description,
+    explanationMd: row.explanationMd,
+    formulaPattern: row.formulaPattern ?? undefined,
+    visualTable: parseJson(row.visualTableJson, undefined),
+    commonMistakes: parseJson(row.commonMistakesJson, undefined),
+    tags: parseJson<string[]>(row.tagsJson, []),
+    drills: parseJson(row.drillsJson, []),
+  };
+}
+
+export function toStory(row: any): GradedStory {
+  return {
+    id: row.slug ?? row.id,
+    title: row.title,
+    cefrLevel: row.cefrLevel,
+    coverEmoji: row.coverEmoji,
+    audioUrl: row.audioUrl ?? undefined,
+    paragraphs: parseJson(row.paragraphsJson, []),
+  };
+}
+
+export function toWord(row: any): WordEntry {
+  const detail = parseJson<Record<string, any>>(row.detailJson, {});
+  return {
+    id: row.id ?? `word-${row.lemma}`,
+    lemma: row.lemma,
+    normalizedLemma: row.normalizedLemma ?? row.lemma?.toLowerCase(),
+    pos: row.pos,
+    gender: row.gender ?? null,
+    cefrLevel: row.cefrLevel,
+    frequencyRank: row.frequencyRank ?? undefined,
+    ipa: row.ipa ?? undefined,
+    audioUrl: row.audioUrl ?? undefined,
+    meaningEn: row.meaningEn,
+    secondaryMeanings: parseJson(row.secondaryMeanings, undefined),
+    register: row.register ?? undefined,
+    disambiguation: row.disambiguation ?? undefined,
+    falseFriends: row.falseFriends ?? undefined,
+    collocations: parseJson(row.collocations, undefined),
+    idioms: parseJson(row.idioms, undefined),
+    isCompound: !!row.isCompound,
+    compoundParts: parseJson(row.compoundParts, undefined),
+    nounTable: detail.nounTable ?? row.nounTable,
+    verbTable: detail.verbTable ?? row.verbTable,
+    adjectiveTable: detail.adjectiveTable ?? row.adjectiveTable,
+    examples: detail.examples ?? row.examples,
+  };
+}
+
+const POS_NAMES: Record<string, string> = {
+  NOUN: 'noun', VERB: 'verb', ADJ: 'adjective', ADV: 'adverb', ART: 'article',
+  PREP: 'preposition', PRON: 'pronoun', CONJ: 'conjunction', PART: 'particle', OTHER: 'word',
+};
+
+export function toSentenceAnalysis(a: any): SentenceAnalysis {
+  const topo = a.topologicalMap ?? {};
+  return {
+    textDe: a.textDe ?? a.sentenceDe,
+    textEnNatural: a.textEnNatural ?? a.sentenceEnNatural ?? '',
+    textEnLiteral: a.textEnLiteral ?? a.sentenceEnLiteral ?? '',
+    cefrLevel: a.cefrLevel ?? 'A2',
+    v2Position1: topo.vorfeld ?? '',
+    v2Verb: topo.linkeSatzklammer ?? '',
+    v2Mittelfeld: topo.mittelfeld ?? '',
+    v2VerbFinal: topo.rechteSatzklammer || undefined,
+    isNebensatz: !!a.isNebensatz,
+    conjunctionTrigger: a.conjunctionTrigger ?? undefined,
+    grammarTags: a.grammarTags ?? [],
+    tokens: (a.tokens ?? []).map((t: any, index: number) => ({
+      tokenIndex: index,
+      surfaceToken: t.surfaceToken ?? t.token ?? '',
+      lemma: t.lemma ?? t.token ?? '',
+      pos: POS_NAMES[String(t.pos).toUpperCase()] ?? String(t.pos ?? 'word').toLowerCase(),
+      gender: t.gender ? String(t.gender).toLowerCase() : null,
+      case: t.case ? String(t.case).toLowerCase() : null,
+      syntaxRole: t.syntaxRole ?? '',
+      declensionTrigger: t.declensionTrigger ?? undefined,
+      meaningEn: t.meaningEn ?? t.literalGlossEn ?? '',
+    })),
+    variations: (a.variations ?? []).map((v: any) => ({
+      de: v.textDe ?? v.de ?? '',
+      en: v.textEn ?? v.en ?? '',
+      note: v.level ?? v.note ?? '',
+    })),
+  };
+}
+
+export function toSpeakingDebrief(e: any): SpeakingDebrief {
+  return {
+    overallScore: Math.round(e.overallScore ?? 0),
+    fluencyScore: Math.round(e.fluencyScore ?? e.overallScore ?? 0),
+    accuracyScore: Math.round(e.accuracyScore ?? e.overallScore ?? 0),
+    // Pronunciation can't be scored from a text transcript, so none are reported.
+    phonemeScores: [],
+    successPoints: e.successes ?? [],
+    corrections: (e.corrections ?? []).map((c: any) => ({
+      learnerSaid: c.originalSnippet,
+      nativeRecast: c.correctedSnippet,
+      rule: c.ruleExplanation,
+    })),
+    minedWords: (e.minedVocabulary ?? []).map((w: any) => ({
+      word: w.gender ? `${w.gender} ${w.lemma}` : w.lemma,
+      pos: w.gender ? 'noun' : 'word',
+      gender: w.gender ?? undefined,
+      meaning: w.meaningEn,
+    })),
+  };
+}
+
+export function toSession(row: any): DailySession {
+  return {
+    id: row.id,
+    userId: row.userId,
+    weekNumber: row.weekNumber,
+    dayNumber: row.dayNumber,
+    block1Done: row.block1Done,
+    block2Done: row.block2Done,
+    block3Done: row.block3Done,
+    block4Done: row.block4Done,
+    block5Done: row.block5Done,
+    status: row.status,
+  };
+}
+
+/** AI-backed results say whether they came from the offline mock (unrelated sample data). */
+export interface AiResult<T> {
+  data: T;
+  mock: boolean;
+}
+
+// ── Endpoints ─────────────────────────────────────────────────────────────
+
+export const api = {
+  async health(): Promise<{ ai: 'mock' | 'live' }> {
+    return request('/health');
+  },
+
+  async getUser(): Promise<User> {
+    const { user } = await request<{ user: any }>('/user/me');
+    return toUser(user);
+  },
+
+  async updateUser(changes: { activeLevel?: CEFRLevel; currentWeek?: number }): Promise<User> {
+    const { user } = await patch<{ user: any }>('/user/me', changes);
+    return toUser(user);
+  },
+
+  async getTodayCards(): Promise<{ cards: Card[]; reviewCount: number; newCount: number; backlogSurplus: number }> {
+    const res = await request<any>('/cards/today');
+    return { ...res, cards: res.cards.map(toCard) };
+  },
+
+  async previewReview(cardId: string): Promise<ReviewPreview> {
+    const { previews } = await post<{ previews: Record<string, { intervalDays: number }> }>(`/cards/${cardId}/preview`);
+    return {
+      1: previews['1'].intervalDays,
+      2: previews['2'].intervalDays,
+      3: previews['3'].intervalDays,
+      4: previews['4'].intervalDays,
+    };
+  },
+
+  async submitReview(cardId: string, rating: 1 | 2 | 3 | 4, responseTimeMs?: number): Promise<Card> {
+    const { card } = await post<{ card: any }>(`/cards/${cardId}/review`, { rating, responseTimeMs });
+    return toCard(card);
+  },
+
+  async addCard(card: Pick<Card, 'cardType' | 'prompt' | 'answer'> & Partial<Pick<Card, 'contextSentence' | 'options' | 'wordId'>>): Promise<Card> {
+    const { card: row } = await post<{ card: any }>('/cards/create', {
+      cardType: card.cardType,
+      prompt: card.prompt,
+      answer: card.answer,
+      contextSentence: card.contextSentence,
+      optionsJson: card.options,
+      wordId: card.wordId,
+    });
+    return toCard(row);
+  },
+
+  async getTopics(): Promise<GrammarTopic[]> {
+    const { topics } = await request<{ topics: any[] }>('/curriculum/syllabus');
+    return topics.map(toTopic);
+  },
+
+  async getGrammarProgress(): Promise<GrammarProgress[]> {
+    const { progress } = await request<{ progress: any[] }>('/curriculum/progress');
+    return progress.map(p => ({
+      topicId: p.topicId,
+      masteryScore: p.masteryScore,
+      timesPracticed: p.timesPracticed,
+      correctCount: p.correctCount,
+      errorCount: p.errorCount,
+      isRemedialActive: p.isRemedialActive,
+      lastPracticedAt: p.lastPracticedAt ?? undefined,
+    }));
+  },
+
+  async recordPractice(topicSlug: string, correct: boolean): Promise<void> {
+    await post(`/curriculum/topics/${encodeURIComponent(topicSlug)}/practice`, { correct });
+  },
+
+  async getStories(): Promise<GradedStory[]> {
+    const { stories } = await request<{ stories: any[] }>('/curriculum/stories');
+    return stories.map(toStory);
+  },
+
+  /** Returns null when the word isn't in the dictionary and the AI can't be asked. */
+  async lookupWord(query: string): Promise<AiResult<WordEntry> | null> {
+    try {
+      const res = await request<{ word: any; source: string }>(`/dictionary/lookup?q=${encodeURIComponent(query.trim())}`);
+      return { data: toWord(res.word), mock: res.source === 'mock' };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
+  },
+
+  async analyzeSentence(sentence: string, level?: string): Promise<AiResult<SentenceAnalysis>> {
+    const res = await post<{ analysis: any; mock: boolean }>('/miner/analyze', { sentence, level });
+    return { data: toSentenceAnalysis(res.analysis), mock: !!res.mock };
+  },
+
+  async evaluateSpeaking(input: { mode: string; scenarioId?: string; transcript: string; targetText?: string }): Promise<AiResult<SpeakingDebrief>> {
+    const res = await post<{ evaluation: any; mock: boolean }>('/speaking/evaluate', input);
+    return { data: toSpeakingDebrief(res.evaluation), mock: !!res.mock };
+  },
+
+  async getTodaySession(): Promise<DailySession> {
+    const { session } = await request<{ session: any }>('/sessions/today');
+    return toSession(session);
+  },
+
+  async completeBlock(sessionId: string, block: 1 | 2 | 3 | 4 | 5): Promise<DailySession> {
+    const { session } = await post<{ session: any }>(`/sessions/${sessionId}/block/${block}/complete`);
+    return toSession(session);
+  },
+
+  async getStats(): Promise<DashboardStats> {
+    return request('/stats/dashboard');
+  },
+};

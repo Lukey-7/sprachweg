@@ -1,17 +1,27 @@
 import React, { useState } from 'react';
 import { X, Award, CheckCircle2, Volume2, Sparkles, AlertCircle } from 'lucide-react';
 import { AudioService } from '../services/audio';
+import { CEFRLevel } from '../types';
+import { errorMessage, useUpdateLevel } from '../services/queries';
 
 interface PlacementTestModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUpdateLevel: (newLevel: string) => void;
 }
 
-export const PlacementTestModal: React.FC<PlacementTestModalProps> = ({ isOpen, onClose, onUpdateLevel }) => {
+export const PlacementTestModal: React.FC<PlacementTestModalProps> = ({ isOpen, onClose }) => {
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
-  const [resultLevel, setResultLevel] = useState<string | null>(null);
+  const [resultLevel, setResultLevel] = useState<CEFRLevel | null>(null);
+  const updateLevel = useUpdateLevel();
+
+  const close = () => {
+    setCurrentStep(0);
+    setAnswers({});
+    setResultLevel(null);
+    updateLevel.reset();
+    onClose();
+  };
 
   if (!isOpen) return null;
 
@@ -68,14 +78,13 @@ export const PlacementTestModal: React.FC<PlacementTestModalProps> = ({ isOpen, 
         if (answers[idx] === q.correct) score += 1;
       });
 
-      let calculated = 'A1';
-      if (score === 4) calculated = 'B1_SOLID';
-      else if (score === 3) calculated = 'B1_START';
+      // Four questions can only separate broad bands, so the estimate stays conservative.
+      let calculated: CEFRLevel = 'A1';
+      if (score === 4) calculated = 'B1_START';
       else if (score === 2) calculated = 'A2';
       else calculated = 'A1';
 
       setResultLevel(calculated);
-      onUpdateLevel(calculated);
       AudioService.playFeedbackSound('complete');
     }
   };
@@ -87,9 +96,9 @@ export const PlacementTestModal: React.FC<PlacementTestModalProps> = ({ isOpen, 
         <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
           <div className="flex items-center gap-2">
             <Award className="w-5 h-5 text-amber-400" />
-            <h2 className="text-lg font-black text-white">CEFR Mock Placement Assessment</h2>
+            <h2 className="text-lg font-black text-white">Placement check</h2>
           </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl">
+          <button onClick={close} className="p-2 text-slate-400 hover:text-white rounded-xl" aria-label="Close">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -120,7 +129,7 @@ export const PlacementTestModal: React.FC<PlacementTestModalProps> = ({ isOpen, 
                     <button
                       key={opt}
                       onClick={() => handleSelectOption(opt)}
-                      className={`w-full p-3 rounded-xl text-xs font-semibold text-left transition-all border ${
+                      className={`w-full min-h-[48px] p-3 rounded-xl text-sm font-semibold text-left transition-all border ${
                         answers[currentStep] === opt
                           ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-bold'
                           : 'bg-slate-900 hover:bg-slate-850 text-slate-200 border-slate-800'
@@ -147,17 +156,24 @@ export const PlacementTestModal: React.FC<PlacementTestModalProps> = ({ isOpen, 
               <div className="w-16 h-16 rounded-3xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto border border-amber-500/30">
                 <Award className="w-8 h-8" />
               </div>
-              <h3 className="text-2xl font-black text-white">Diagnostic Certified!</h3>
+              <h3 className="text-2xl font-black text-white">Estimated level</h3>
               <div className="text-3xl font-black text-emerald-400">{resultLevel.replace('_', ' ')}</div>
               <p className="text-xs text-slate-300 max-w-sm mx-auto">
-                Your syllabus and daily session difficulty have been recalibrated to match your verified proficiency level.
+                A rough estimate from {testQuestions.length} questions. Apply it to set your level, or keep your current one.
               </p>
-              <button
-                onClick={onClose}
-                className="py-3 px-8 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg transition-all"
-              >
-                Apply & Return to Dashboard
-              </button>
+              {updateLevel.isError && <p className="text-sm text-rose-300">{errorMessage(updateLevel.error)}</p>}
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={close} className="min-h-[48px] rounded-2xl bg-slate-800 text-slate-100 font-bold text-sm">
+                  Keep current
+                </button>
+                <button
+                  onClick={() => updateLevel.mutate(resultLevel, { onSuccess: close })}
+                  disabled={updateLevel.isPending}
+                  className="min-h-[48px] rounded-2xl bg-emerald-500 disabled:opacity-50 text-slate-950 font-bold text-sm"
+                >
+                  {updateLevel.isPending ? 'Saving…' : 'Apply level'}
+                </button>
+              </div>
             </div>
           )}
         </div>

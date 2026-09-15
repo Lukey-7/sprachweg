@@ -168,6 +168,7 @@ export interface DailySession {
   block3Done: boolean; // Sentence mining
   block4Done: boolean; // Speaking task
   block5Done: boolean; // Immersion listening/reading
+  status?: 'in_progress' | 'completed' | 'abandoned';
   remedialDrills?: GrammarDrill[];
   score?: number;
 }
@@ -189,4 +190,26 @@ export interface GradedStory {
   coverEmoji: string;
   audioUrl?: string;
   paragraphs: { textDe: string; textEn: string }[];
+}
+
+/** Days until the card is due again for each rating (1 Again … 4 Easy). */
+export type ReviewPreview = Record<1 | 2 | 3 | 4, number>;
+
+export interface DashboardStats {
+  totalCards: number;
+  cardsByState: Record<'new' | 'learning' | 'review' | 'relearning', number>;
+  matureCards: number;
+  totalReviews: number;
+  reviewsThisWeek: number;
+  retentionThisWeek: number | null;
+  streak: number;
+  estimatedCEFR: CEFRLevel;
+  grammar: {
+    slug: string;
+    titleDe: string;
+    cefrLevel: string;
+    masteryScore: number;
+    timesPracticed: number;
+    isRemedialActive: boolean;
+  }[];
 }

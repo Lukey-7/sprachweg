@@ -5,7 +5,9 @@ datasource db {
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "native" for local dev; rhel-openssl-3.0.x is the Vercel (Amazon Linux) engine.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 model User {

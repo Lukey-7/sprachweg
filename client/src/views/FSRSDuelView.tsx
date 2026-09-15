@@ -1,186 +1,214 @@
-import React, { useState } from 'react';
-import { Brain, Volume2, Check, RefreshCw, Eye, Sparkles, Layers, Award } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Award, Brain, Eye, Volume2 } from 'lucide-react';
 import { Card } from '../types';
-import { ApiService } from '../services/api';
 import { AudioService } from '../services/audio';
+import { ErrorPanel, LoadingPanel, useToast } from '../components/Feedback';
+import { useQueryClient } from '@tanstack/react-query';
+import { errorMessage, keys, useMarkBlockDone, useReviewPreview, useSubmitReview, useTodayCards } from '../services/queries';
 
 interface FSRSDuelViewProps {
-  cards: Card[];
-  onReviewCard: (cardId: string, rating: 1 | 2 | 3 | 4) => void;
   onOpenWordLookup: (word: string) => void;
+  onFinished: () => void;
 }
 
-export const FSRSDuelView: React.FC<FSRSDuelViewProps> = ({ cards, onReviewCard, onOpenWordLookup }) => {
-  const [currentIndex, setCurrentIndex] = useState(0);
+type Rating = 1 | 2 | 3 | 4;
+
+const RATINGS: { rating: Rating; label: string; key: string; cls: string }[] = [
+  { rating: 1, label: 'Again', key: '1', cls: 'bg-rose-500/20 text-rose-200 border-rose-500/40' },
+  { rating: 2, label: 'Hard', key: '2', cls: 'bg-amber-500/20 text-amber-200 border-amber-500/40' },
+  { rating: 3, label: 'Good', key: '3', cls: 'bg-blue-500/20 text-blue-200 border-blue-500/40' },
+  { rating: 4, label: 'Easy', key: '4', cls: 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40' },
+];
+
+export function formatInterval(days: number | undefined): string {
+  if (days === undefined || !Number.isFinite(days)) return '…';
+  const minutes = days * 24 * 60;
+  if (minutes < 60) return `${Math.max(1, Math.round(minutes))} min`;
+  if (days < 1) return `${Math.round(minutes / 60)} h`;
+  if (days < 30) return `${Math.round(days)} d`;
+  if (days < 365) return `${Math.round(days / 30)} mo`;
+  return `${(days / 365).toFixed(1)} y`;
+}
+
+export const FSRSDuelView: React.FC<FSRSDuelViewProps> = ({ onOpenWordLookup, onFinished }) => {
+  const today = useTodayCards();
+  // Snapshot of the queue for this round, so refetches don't reshuffle cards mid-review.
+  const [round, setRound] = useState<Card[] | null>(null);
+  const [index, setIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
-  const [sessionCompleted, setSessionCompleted] = useState(false);
+  const shownAt = useRef(Date.now());
 
-  const currentCard: Card | undefined = cards[currentIndex];
+  const submit = useSubmitReview();
+  const markDone = useMarkBlockDone();
+  const toast = useToast();
+  const queryClient = useQueryClient();
 
-  const handleFlip = () => {
-    setIsFlipped(true);
-    AudioService.playFeedbackSound('click');
-  };
+  useEffect(() => {
+    if (round === null && today.data) setRound(today.data.cards);
+  }, [today.data, round]);
 
-  const handleRate = (rating: 1 | 2 | 3 | 4) => {
-    if (!currentCard) return;
+  const card = round?.[index];
+  const preview = useReviewPreview(isFlipped ? card?.id : undefined);
+  const finished = round !== null && index >= round.length;
 
-    if (rating === 1) AudioService.playFeedbackSound('error');
-    else AudioService.playFeedbackSound('correct');
+  useEffect(() => {
+    shownAt.current = Date.now();
+  }, [card?.id]);
 
-    onReviewCard(currentCard.id, rating);
-    setIsFlipped(false);
-
-    if (currentIndex < cards.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-    } else {
-      setSessionCompleted(true);
+  useEffect(() => {
+    if (finished && round && round.length > 0) {
+      // Refresh the due count (nav badge, Today); this round's snapshot is unaffected.
+      queryClient.invalidateQueries({ queryKey: keys.todayCards });
+      markDone(1);
       AudioService.playFeedbackSound('complete');
     }
+  }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const flip = useCallback(() => {
+    setIsFlipped(true);
+    AudioService.playFeedbackSound('click');
+  }, []);
+
+  const rate = useCallback(
+    async (rating: Rating) => {
+      if (!card || submit.isPending) return;
+      try {
+        await submit.mutateAsync({ cardId: card.id, rating, responseTimeMs: Date.now() - shownAt.current });
+        AudioService.playFeedbackSound(rating === 1 ? 'error' : 'correct');
+        setIsFlipped(false);
+        setIndex(i => i + 1);
+      } catch (e) {
+        // The card stays on screen so the rating can be retried; nothing is lost.
+        toast('error', `Review not saved: ${errorMessage(e)}`);
+      }
+    },
+    [card, submit, toast]
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!card || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (!isFlipped && (e.code === 'Space' || e.key === 'Enter')) {
+        e.preventDefault();
+        flip();
+      } else if (isFlipped && ['1', '2', '3', '4'].includes(e.key)) {
+        rate(Number(e.key) as Rating);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [card, isFlipped, flip, rate]);
+
+  const startNextRound = async () => {
+    const { data } = await today.refetch();
+    setRound(data?.cards ?? []);
+    setIndex(0);
+    setIsFlipped(false);
   };
 
-  const handlePlayAudio = () => {
-    if (currentCard) {
-      AudioService.playGermanText(currentCard.contextSentence || currentCard.prompt || currentCard.answer);
-    }
-  };
+  if (today.isPending || round === null) return <LoadingPanel label="Loading your reviews…" />;
+  if (today.isError) return <ErrorPanel error={today.error} onRetry={() => today.refetch()} />;
 
-  if (sessionCompleted || !currentCard) {
+  if (finished || !card) {
+    const reviewed = round.length;
     return (
-      <div className="bg-slate-900 p-8 rounded-3xl border border-slate-800 shadow-xl text-center space-y-4 max-w-lg mx-auto mt-8 animate-in zoom-in-95 duration-300">
-        <div className="w-16 h-16 rounded-3xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/30">
+      <div className="bg-slate-900 p-8 rounded-3xl border border-slate-800 text-center space-y-4 max-w-lg mx-auto">
+        <div className="w-16 h-16 rounded-3xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
           <Award className="w-8 h-8" />
         </div>
-        <h2 className="text-2xl font-black text-white">Daily FSRS Queue Clear!</h2>
-        <p className="text-xs sm:text-sm text-slate-300 max-w-sm mx-auto">
-          You reviewed all scheduled cards for today with optimal memory retention parameters. Great work!
+        <h2 className="text-2xl font-black text-white">{reviewed > 0 ? 'All caught up!' : 'Nothing to review'}</h2>
+        <p className="text-sm text-slate-300">
+          {reviewed > 0
+            ? `You reviewed ${reviewed} card${reviewed === 1 ? '' : 's'}. Cards you marked "Again" come back shortly.`
+            : 'No cards are due. Words you add from the Dictionary, Sentence Miner or Speak tab show up here.'}
         </p>
-        <button
-          onClick={() => {
-            setCurrentIndex(0);
-            setSessionCompleted(false);
-            setIsFlipped(false);
-          }}
-          className="py-3 px-6 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg transition-all"
-        >
-          Review Again
-        </button>
+        <div className="flex flex-col gap-2">
+          <button onClick={startNextRound} className="py-3 rounded-2xl bg-slate-800 text-slate-100 font-bold text-sm">
+            Check for more cards
+          </button>
+          <button onClick={onFinished} className="py-3 rounded-2xl bg-emerald-500 text-slate-950 font-bold text-sm">
+            Back to today
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 pb-12 animate-in fade-in duration-300 max-w-xl mx-auto">
-      {/* Header Bar */}
-      <div className="bg-slate-900 p-4 sm:p-5 rounded-3xl border border-slate-800 shadow-xl flex items-center justify-between">
+    <div className="space-y-4 pb-4 max-w-xl mx-auto">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
-            <Brain className="w-5 h-5" />
-          </div>
-          <div>
-            <h1 className="text-base sm:text-lg font-black text-white">FSRS Memory Review</h1>
-            <p className="text-[11px] text-slate-400">Card {currentIndex + 1} of {cards.length}</p>
-          </div>
+          <Brain className="w-5 h-5 text-emerald-400" />
+          <h1 className="text-lg font-black text-white">Review</h1>
         </div>
-
-        <div className="flex items-center gap-2 text-xs">
-          <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 font-semibold border border-slate-700">
-            {currentCard.cardType.replace('_', ' ')}
-          </span>
-          <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
-            Reps: {currentCard.reps}
-          </span>
-        </div>
+        <span className="text-sm font-semibold text-slate-400">
+          {index + 1} / {round.length}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+        <div className="h-full bg-emerald-500 transition-all" style={{ width: `${(index / round.length) * 100}%` }} />
       </div>
 
-      {/* Flashcard Body */}
-      <div className="bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl p-6 sm:p-8 min-h-[320px] flex flex-col justify-between relative overflow-hidden transition-all">
-        {/* Top Info */}
+      <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 min-h-[340px] flex flex-col">
         <div className="flex items-center justify-between text-xs text-slate-400">
-          <span className="font-semibold text-slate-400 uppercase tracking-wider">
-            {isFlipped ? 'Back (Answer & Context)' : 'Front (Prompt)'}
+          <span className="font-semibold uppercase tracking-wider">
+            {card.cardType.replace(/_/g, ' ')}
+            {card.state === 'new' && <span className="ml-2 text-emerald-400">new</span>}
           </span>
           <button
-            onClick={handlePlayAudio}
-            className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-750 text-emerald-400"
-            title="Listen to audio"
+            // The context sentence contains the answer for cloze cards, so it is only read after flipping.
+            onClick={() => AudioService.playGermanText(isFlipped ? card.contextSentence || card.prompt : card.prompt.replace(/_+/g, ' '))}
+            className="p-2.5 rounded-full bg-slate-800 text-emerald-400"
+            aria-label="Listen"
           >
-            <Volume2 className="w-4 h-4" />
+            <Volume2 className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Center Content */}
         <div className="my-auto py-6 text-center space-y-4">
-          <div className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-            {currentCard.prompt}
-          </div>
+          {card.cardType === 'recognition' ? (
+            <button onClick={() => onOpenWordLookup(card.prompt.replace(/^(der|die|das)\s+/i, ''))} className="text-3xl font-black text-white tracking-tight">
+              {card.prompt}
+            </button>
+          ) : (
+            <p className="text-2xl font-black text-white tracking-tight">{card.prompt}</p>
+          )}
 
-          {currentCard.contextSentence && (
-            <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto italic bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
-              "{currentCard.contextSentence}"
-            </p>
+          {card.contextSentence && isFlipped && (
+            <p className="text-sm text-slate-400 italic bg-slate-950/60 p-3 rounded-2xl border border-slate-800">“{card.contextSentence}”</p>
           )}
 
           {isFlipped && (
-            <div className="pt-4 border-t border-slate-800/80 animate-in fade-in zoom-in-95 duration-200">
-              <div className="text-xs uppercase font-bold text-emerald-400 mb-1">Answer</div>
-              <div className="text-xl sm:text-2xl font-bold text-emerald-300">
-                {currentCard.answer}
-              </div>
+            <div className="pt-4 border-t border-slate-800">
+              <div className="text-2xl font-bold text-emerald-300">{card.answer}</div>
             </div>
           )}
         </div>
 
-        {/* Bottom Actions */}
-        <div>
-          {!isFlipped ? (
-            <button
-              onClick={handleFlip}
-              className="w-full py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-sm shadow-lg flex items-center justify-center gap-2 transition-all active:scale-98"
-            >
-              <Eye className="w-4 h-4" /> Reveal Answer (Space)
-            </button>
-          ) : (
-            <div className="grid grid-cols-4 gap-2 animate-in slide-in-from-bottom-2 duration-200">
-              {/* 1: Again */}
+        {!isFlipped ? (
+          <button
+            onClick={flip}
+            className="w-full min-h-[56px] rounded-2xl bg-emerald-500 active:bg-emerald-400 text-slate-950 font-bold text-base flex items-center justify-center gap-2"
+          >
+            <Eye className="w-5 h-5" /> Show answer
+          </button>
+        ) : (
+          <div className="grid grid-cols-4 gap-2">
+            {RATINGS.map(r => (
               <button
-                onClick={() => handleRate(1)}
-                className="p-3 rounded-2xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 flex flex-col items-center justify-center transition-all active:scale-95"
+                key={r.rating}
+                onClick={() => rate(r.rating)}
+                disabled={submit.isPending}
+                className={`min-h-[64px] rounded-2xl border flex flex-col items-center justify-center disabled:opacity-50 ${r.cls}`}
               >
-                <span className="font-extrabold text-xs">Again</span>
-                <span className="text-[10px] text-rose-400 mt-0.5">10 min</span>
+                <span className="font-extrabold text-sm">{r.label}</span>
+                <span className="text-xs opacity-80 mt-0.5">{preview.data ? formatInterval(preview.data[r.rating]) : '…'}</span>
               </button>
-
-              {/* 2: Hard */}
-              <button
-                onClick={() => handleRate(2)}
-                className="p-3 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 flex flex-col items-center justify-center transition-all active:scale-95"
-              >
-                <span className="font-extrabold text-xs">Hard</span>
-                <span className="text-[10px] text-amber-400 mt-0.5">1.2 d</span>
-              </button>
-
-              {/* 3: Good */}
-              <button
-                onClick={() => handleRate(3)}
-                className="p-3 rounded-2xl bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 flex flex-col items-center justify-center transition-all active:scale-95"
-              >
-                <span className="font-extrabold text-xs">Good</span>
-                <span className="text-[10px] text-blue-400 mt-0.5">3.5 d</span>
-              </button>
-
-              {/* 4: Easy */}
-              <button
-                onClick={() => handleRate(4)}
-                className="p-3 rounded-2xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 flex flex-col items-center justify-center transition-all active:scale-95"
-              >
-                <span className="font-extrabold text-xs">Easy</span>
-                <span className="text-[10px] text-emerald-400 mt-0.5">7.0 d</span>
-              </button>
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
+      <p className="hidden sm:block text-center text-xs text-slate-500">Space to show · 1–4 to rate</p>
     </div>
   );
 };

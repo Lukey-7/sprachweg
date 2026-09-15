@@ -14,6 +14,34 @@ userRouter.get('/me', async (req: Request, res: Response) => {
 });
 
 
+const LEVELS = ['A0', 'A1', 'A2', 'B1_START', 'B1_SOLID', 'B2'];
+
+userRouter.patch('/me', async (req: Request, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    await ensureUser(userId);
+    const { activeLevel, currentWeek, name } = req.body ?? {};
+    if (activeLevel !== undefined && !LEVELS.includes(activeLevel)) {
+      return res.status(400).json({ error: `activeLevel must be one of ${LEVELS.join(', ')}` });
+    }
+    if (currentWeek !== undefined && !(Number.isInteger(currentWeek) && currentWeek >= 1 && currentWeek <= 52)) {
+      return res.status(400).json({ error: 'currentWeek must be an integer from 1 to 52' });
+    }
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(activeLevel !== undefined && { activeLevel }),
+        ...(currentWeek !== undefined && { currentWeek }),
+        ...(typeof name === 'string' && name.trim() && { name: name.trim().slice(0, 60) }),
+      },
+      include: { settings: true },
+    });
+    res.json({ user });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to update user', message: error?.message });
+  }
+});
+
 userRouter.get('/profile', async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);

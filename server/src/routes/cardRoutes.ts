@@ -1,8 +1,8 @@
-﻿import { Router, Request, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import { FsrsQueueManager } from '../fsrs/queueManager.js';
 import { FsrsEngine } from '../fsrs/fsrsEngine.js';
 import { SentenceCardGenerator } from '../miner/variations.js';
-import { getUserId, recordActivity } from '../user.js';
+import { getTzOffset, getUserId, recordActivity } from '../user.js';
 import { prisma } from '../db/prisma.js';
 import { CardType, CardState } from '../fsrs/types.js';
 
@@ -66,7 +66,7 @@ cardRouter.post('/:id/review', async (req: Request, res: Response) => {
       numRating,
       responseTimeMs || 0
     );
-    await recordActivity(userId);
+    await recordActivity(userId, getTzOffset(req));
 
     res.json(result);
   } catch (error: any) {
