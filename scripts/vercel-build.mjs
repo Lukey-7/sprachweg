@@ -45,7 +45,19 @@ if (existsSync('prisma/schema.prisma')) cpSync('prisma/schema.prisma', join(fn, 
 
 writeFileSync(
   join(fn, '.vc-config.json'),
-  JSON.stringify({ runtime: 'nodejs22.x', handler: 'index.js', launcherType: 'Nodejs', maxDuration: 30, shouldAddSourcemapSupport: true }, null, 2)
+  JSON.stringify(
+    {
+      runtime: 'nodejs22.x',
+      handler: 'index.js',
+      launcherType: 'Nodejs',
+      maxDuration: 30,
+      shouldAddSourcemapSupport: true,
+      // Singapore, next to the Neon database (ap-southeast-1); every request makes several DB round trips.
+      regions: ['sin1'],
+    },
+    null,
+    2
+  )
 );
 
 writeFileSync(
