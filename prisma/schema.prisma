@@ -1,6 +1,7 @@
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 generator client {
@@ -68,6 +69,7 @@ model Word {
   idioms             String?         // JSON string array of Redewendungen
   isCompound         Boolean         @default(false)
   compoundParts      String?         // JSON array of decompounded segments
+  detailJson         String?         // JSON: nounTable / verbTable / adjectiveTable / examples
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
@@ -224,6 +226,7 @@ model GrammarTopic {
   visualTableJson    String?           // JSON structured matrix
   commonMistakesJson String?           // JSON array of pitfall comparisons
   tagsJson           String            // JSON array of tags
+  drillsJson         String?           // JSON array of GrammarDrill
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
@@ -356,4 +359,20 @@ model CacheEntry {
   @@index([cacheKey])
   @@index([cacheType])
   @@map("cache_entries")
+}
+
+model GradedStory {
+  id             String   @id @default(uuid())
+  slug           String   @unique
+  title          String
+  cefrLevel      String
+  coverEmoji     String
+  audioUrl       String?
+  paragraphsJson String   // JSON array of { textDe, textEn }
+  orderIndex     Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([cefrLevel])
+  @@map("graded_stories")
 }

@@ -2,6 +2,7 @@
 import { FsrsQueueManager } from '../fsrs/queueManager.js';
 import { FsrsEngine } from '../fsrs/fsrsEngine.js';
 import { SentenceCardGenerator } from '../miner/variations.js';
+import { getUserId, recordActivity } from '../user.js';
 import { prisma } from '../db/prisma.js';
 import { CardType, CardState } from '../fsrs/types.js';
 
@@ -9,7 +10,7 @@ export const cardRouter = Router();
 
 cardRouter.get('/study-queue', async (req: Request, res: Response) => {
   try {
-    const userId = (req.headers['x-user-id'] as string) || 'guest-user-001';
+    const userId = getUserId(req);
     const queue = await FsrsQueueManager.getDailyStudyQueue(userId);
 
     const fullQueue = [...queue.reviewQueue, ...queue.newQueue];
@@ -30,9 +31,30 @@ cardRouter.get('/study-queue', async (req: Request, res: Response) => {
   }
 });
 
+// Today's study queue as stored card rows (what the app renders): due reviews
+// first, then new cards, both capped by the learner's daily limits.
+cardRouter.get('/today', async (req: Request, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    const queue = await FsrsQueueManager.getDailyStudyQueue(userId);
+    const ids = [...queue.reviewQueue, ...queue.newQueue].map(c => c.id);
+    const rows = await prisma.card.findMany({ where: { id: { in: ids } } });
+    const byId = new Map(rows.map(r => [r.id, r]));
+
+    res.json({
+      cards: ids.map(id => byId.get(id)).filter(Boolean),
+      reviewCount: queue.reviewQueue.length,
+      newCount: queue.newQueue.length,
+      backlogSurplus: queue.backlogSurplus,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: "Failed to fetch today's cards", message: error?.message });
+  }
+});
+
 cardRouter.post('/:id/review', async (req: Request, res: Response) => {
   try {
-    const userId = (req.headers['x-user-id'] as string) || 'guest-user-001';
+    const userId = getUserId(req);
     const { id } = req.params;
     const { rating, responseTimeMs } = req.body;
 
@@ -44,6 +66,7 @@ cardRouter.post('/:id/review', async (req: Request, res: Response) => {
       numRating,
       responseTimeMs || 0
     );
+    await recordActivity(userId);
 
     res.json(result);
   } catch (error: any) {
@@ -56,7 +79,7 @@ cardRouter.post('/:id/review', async (req: Request, res: Response) => {
 
 cardRouter.post('/create', async (req: Request, res: Response) => {
   try {
-    const userId = (req.headers['x-user-id'] as string) || 'guest-user-001';
+    const userId = getUserId(req);
     const { prompt, answer } = req.body;
 
     if (!prompt || !answer) {
@@ -112,7 +135,7 @@ cardRouter.post('/:id/preview', async (req: Request, res: Response) => {
 
 cardRouter.get('/stats', async (req: Request, res: Response) => {
   try {
-    const userId = (req.headers['x-user-id'] as string) || 'guest-user-001';
+    const userId = getUserId(req);
     const allCards = await prisma.card.findMany({ where: { userId } });
 
     const total = allCards.length;

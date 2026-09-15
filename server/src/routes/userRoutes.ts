@@ -1,11 +1,22 @@
+import { ensureUser, getUserId } from '../user.js';
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db/prisma.js';
 
 export const userRouter = Router();
 
+userRouter.get('/me', async (req: Request, res: Response) => {
+  try {
+    const user = await ensureUser(getUserId(req));
+    res.json({ user });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to load user', message: error?.message });
+  }
+});
+
+
 userRouter.get('/profile', async (req: Request, res: Response) => {
   try {
-    const userId = (req.headers['x-user-id'] as string) || 'guest-user-001';
+    const userId = getUserId(req);
     const user = await prisma.user.findUnique({
       where: { id: userId },
       include: { settings: true },
@@ -28,7 +39,7 @@ userRouter.get('/profile', async (req: Request, res: Response) => {
 
 userRouter.patch('/settings', async (req: Request, res: Response) => {
   try {
-    const userId = (req.headers['x-user-id'] as string) || 'guest-user-001';
+    const userId = getUserId(req);
     const { dailyNewCards, dailyReviewCap, targetRetention, voiceSpeed, ttsVoice, theme, autoPlayAudio } = req.body;
 
     const updatedSettings = await prisma.settings.upsert({

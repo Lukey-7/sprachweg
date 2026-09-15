@@ -19,11 +19,13 @@
     "test:e2e": "npx tsx e2e/harness/runAllTests.ts",
     "test:server": "npm --prefix server run test",
     "test": "npm run test:server && npm run test:e2e",
-    "prisma:generate": "npm --prefix server run prisma:generate",
-    "prisma:push": "npm --prefix server run prisma:push",
-    "prisma:migrate": "npm --prefix server run prisma:migrate",
-    "prisma:seed": "npm --prefix server run prisma:seed",
-    "prisma:studio": "npm --prefix server run prisma:studio"
+    "db:generate": "prisma generate --schema=prisma/schema.prisma",
+    "db:push": "prisma db push --schema=prisma/schema.prisma",
+    "db:push:test": "node scripts/with-test-db.mjs prisma db push --skip-generate --schema=prisma/schema.prisma",
+    "db:seed": "npm --prefix server run db:seed",
+    "db:studio": "prisma studio --schema=prisma/schema.prisma",
+    "build": "npm run db:generate && npm --prefix client run build",
+    "postinstall": "prisma generate --schema=prisma/schema.prisma"
   },
   "keywords": [
     "german",
@@ -37,5 +39,13 @@
   "license": "MIT",
   "devDependencies": {
     "playwright": "^1.62.1"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "esbuild@0.21.5": true,
+    "prisma@5.22.0": true,
+    "@prisma/client@5.22.0": true,
+    "@prisma/engines@5.22.0": true
   }
 }

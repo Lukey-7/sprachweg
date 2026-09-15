@@ -111,7 +111,7 @@ describe('Milestone 1 Core Backend Test Suite', () => {
     });
 
     it('1.3 creates Card, Review, GrammarProgress, Lesson, Session, SpeakingSession, ErrorLog, and CacheEntry models', async () => {
-      const user = await prisma.user.findFirst({ where: { email: 'guest@sprachweg.app' } });
+      const user = await prisma.user.findFirst({ where: { email: 'guest-user-001@sprachweg.local' } });
       expect(user).toBeDefined();
 
       // Card & Review
@@ -353,7 +353,7 @@ describe('Milestone 1 Core Backend Test Suite', () => {
       const res = await request(app).post('/api/auth/guest');
       expect(res.status).toBe(200);
       expect(res.body.user).toBeDefined();
-      expect(res.body.user.email).toBe('guest@sprachweg.app');
+      expect(res.body.user.email).toBe('guest-user-001@sprachweg.local');
       expect(res.body.settings.dailyNewCards).toBe(20);
     });
 
@@ -444,9 +444,9 @@ describe('Milestone 1 Core Backend Test Suite', () => {
       expect(syllabusRes.body.topics).toBeInstanceOf(Array);
       expect(syllabusRes.body.totalWeeks).toBe(52);
 
-      const topicRes = await request(app).get('/api/curriculum/topics/gender-and-articles');
+      const topicRes = await request(app).get('/api/curriculum/topics/nominativ-articles-gender');
       expect(topicRes.status).toBe(200);
-      expect(topicRes.body.topic.slug).toBe('gender-and-articles');
+      expect(topicRes.body.topic.slug).toBe('nominativ-articles-gender');
     });
 
     it('4.12 GET /api/sessions/today and POST /api/sessions/:id/block/:num/complete', async () => {

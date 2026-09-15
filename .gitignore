@@ -21,3 +21,8 @@ yarn-error.log*
 # OS Files
 .DS_Store
 Thumbs.db
+.env
+*.db
+*.db-journal
+.vercel
+client/dev-dist/

@@ -15,6 +15,15 @@ curriculumRouter.get('/syllabus', async (_req: Request, res: Response) => {
   }
 });
 
+curriculumRouter.get('/stories', async (_req: Request, res: Response) => {
+  try {
+    const stories = await prisma.gradedStory.findMany({ orderBy: { orderIndex: 'asc' } });
+    res.json({ stories });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch stories', message: error?.message });
+  }
+});
+
 curriculumRouter.get('/topics/:slug', async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;

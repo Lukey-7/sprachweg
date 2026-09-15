@@ -1,7 +1,8 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+import './env.js';
 import { prisma } from './db/prisma.js';
+import { geminiService } from './ai/geminiClient.js';
 
 // Route imports
 import { authRouter } from './routes/authRoutes.js';
@@ -15,8 +16,6 @@ import { speakingRouter } from './routes/speakingRoutes.js';
 import { statsRouter } from './routes/statsRoutes.js';
 import { cacheRouter } from './routes/cacheRoutes.js';
 import { linguisticsRouter } from './routes/linguisticsRoutes.js';
-
-dotenv.config();
 
 export function createServer(): Express {
   const app = express();
@@ -44,6 +43,7 @@ export function createServer(): Express {
         timestamp: new Date().toISOString(),
         database: 'connected',
         cache: 'ready',
+        ai: geminiService.isMockMode ? 'mock' : 'live',
       });
     } catch (err: any) {
       res.status(500).json({

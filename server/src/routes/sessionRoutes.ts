@@ -1,3 +1,4 @@
+import { getUserId } from '../user.js';
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db/prisma.js';
 
@@ -5,7 +6,7 @@ export const sessionRouter = Router();
 
 sessionRouter.get('/today', async (req: Request, res: Response) => {
   try {
-    const userId = (req.headers['x-user-id'] as string) || 'guest-user-001';
+    const userId = getUserId(req);
 
     let session = await prisma.session.findFirst({
       where: {

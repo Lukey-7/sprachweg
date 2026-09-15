@@ -97,7 +97,7 @@ describe('Milestone 1 Challenger Empirical Stress & Adversarial Test Suite', () 
       for (const res of responses) {
         expect(res.status).toBe(200);
         expect(res.body.word).toBeDefined();
-        expect(['database', 'gemini']).toContain(res.body.source);
+        expect(['database', 'gemini', 'mock']).toContain(res.body.source);
       }
     });
 

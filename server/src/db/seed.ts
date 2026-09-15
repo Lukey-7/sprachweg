@@ -1,36 +1,14 @@
 import { prisma } from './prisma.js';
+import { USER_ID } from '../env.js';
+import { ensureUser } from '../user.js';
+import { SEED_DICTIONARY, SEED_STORIES, SEED_TOPICS } from './content.js';
 
 export async function seedDatabase() {
   console.log('Seeding initial Sprachweg database...');
 
-  // 1. Seed Guest User & Settings
-  const guestUser = await prisma.user.upsert({
-    where: { email: 'guest@sprachweg.app' },
-    update: {},
-    create: {
-      id: 'guest-user-001',
-      email: 'guest@sprachweg.app',
-      name: 'Guest Learner',
-      activeLevel: 'A1',
-      currentWeek: 1,
-      streakCount: 3,
-      freezeTokens: 2,
-      settings: {
-        create: {
-          dailyNewCards: 20,
-          dailyReviewCap: 100,
-          targetRetention: 0.90,
-          voiceSpeed: 1.0,
-          ttsVoice: 'de-DE-Wavenet-F',
-          theme: 'system',
-          autoPlayAudio: true,
-        },
-      },
-    },
-    include: { settings: true },
-  });
-
-  console.log(`Guest user seeded: ${guestUser.id}`);
+  // 1. The learner row (id from SPRACHWEG_USER_ID) with default settings
+  const learner = await ensureUser(USER_ID);
+  console.log(`Learner ready: ${learner.id}`);
 
   // 2. Seed Baseline Core Vocabulary Words with Word Forms
   const wordData = [
@@ -137,60 +115,62 @@ export async function seedDatabase() {
     }
   }
 
-  // 3. Seed Baseline Grammar Topics
-  const topicData = [
-    {
-      slug: 'gender-and-articles',
-      titleDe: 'Geschlecht und Artikel',
-      titleEn: 'Noun Gender & Definite/Indefinite Articles',
-      cefrLevel: 'A1',
-      weekNumber: 1,
-      orderIndex: 1,
-      description: 'Master the three German genders (der, die, das) and definite/indefinite articles.',
-      explanationMd: '# German Genders\n\nGerman nouns have three grammatical genders:\n- **der** (Masculine, Blue)\n- **die** (Feminine, Red)\n- **das** (Neuter, Green)\n- **die** (Plural, Purple)',
-      tagsJson: JSON.stringify(['gender', 'articles', 'der_die_das', 'A1']),
-    },
-    {
-      slug: 'satzklammer-v2',
-      titleDe: 'Satzklammer & Verbzweitstellung',
-      titleEn: 'Sentence Bracket & V2 Word Order',
-      cefrLevel: 'A1',
-      weekNumber: 1,
-      orderIndex: 2,
-      description: 'The golden rule of German main clauses: the finite verb is locked in Position 2.',
-      explanationMd: '# Satzklammer and V2\n\nIn standard German declarative clauses, the conjugated verb always sits in Position 2 (V2), regardless of what occupies Position 1 (Vorfeld).',
-      tagsJson: JSON.stringify(['word_order', 'v2', 'satzklammer', 'A1']),
-    },
-    {
-      slug: 'accusative-case',
-      titleDe: 'Der Akkusativ',
-      titleEn: 'The Accusative Case (Direct Objects)',
-      cefrLevel: 'A1',
-      weekNumber: 2,
-      orderIndex: 1,
-      description: 'Understand direct objects and masculine article changes (der -> den, ein -> einen).',
-      explanationMd: '# The Accusative Case\n\nThe accusative case marks the direct receiver of an action. Only masculine articles change: *der* -> *den*, *ein* -> *einen*.',
-      tagsJson: JSON.stringify(['case', 'accusative', 'direct_object', 'A1']),
-    },
-    {
-      slug: 'subordinate-clauses-weil',
-      titleDe: 'Nebensätze mit "weil"',
-      titleEn: 'Subordinate Clauses with "weil"',
-      cefrLevel: 'A2',
-      weekNumber: 5,
-      orderIndex: 1,
-      description: 'Learn how subordinating conjunctions kick the finite verb to the very end of the clause.',
-      explanationMd: '# Nebensätze mit "weil"\n\nSubordinating conjunctions like *weil* trigger verb-final word order.',
-      tagsJson: JSON.stringify(['word_order', 'nebensatz', 'verb_final', 'weil', 'A2']),
-    },
-  ];
+  // 3. Grammar course topics with drills
+  for (const t of SEED_TOPICS) {
+    const topic = {
+      slug: t.slug,
+      titleDe: t.titleDe,
+      titleEn: t.titleEn,
+      cefrLevel: t.cefrLevel,
+      weekNumber: t.weekNumber,
+      orderIndex: t.orderIndex,
+      description: t.description,
+      explanationMd: t.explanationMd,
+      formulaPattern: t.formulaPattern ?? null,
+      visualTableJson: t.visualTable ? JSON.stringify(t.visualTable) : null,
+      commonMistakesJson: t.commonMistakes ? JSON.stringify(t.commonMistakes) : null,
+      tagsJson: JSON.stringify(t.tags || []),
+      drillsJson: JSON.stringify(t.drills || []),
+    };
+    await prisma.grammarTopic.upsert({ where: { slug: topic.slug }, update: topic, create: topic });
+  }
 
-  for (const topic of topicData) {
-    await prisma.grammarTopic.upsert({
-      where: { slug: topic.slug },
-      update: topic,
-      create: topic,
-    });
+  // 3b. Reference dictionary entries with full tables
+  for (const w of Object.values(SEED_DICTIONARY)) {
+    const { nounTable, verbTable, adjectiveTable, examples } = w;
+    const word = {
+      lemma: w.lemma,
+      normalizedLemma: w.normalizedLemma,
+      pos: w.pos,
+      gender: w.gender ?? null,
+      cefrLevel: w.cefrLevel,
+      ipa: w.ipa ?? null,
+      meaningEn: w.meaningEn,
+      secondaryMeanings: w.secondaryMeanings ? JSON.stringify(w.secondaryMeanings) : null,
+      register: w.register ?? null,
+      disambiguation: w.disambiguation ?? null,
+      falseFriends: w.falseFriends ?? null,
+      collocations: w.collocations ? JSON.stringify(w.collocations) : null,
+      idioms: w.idioms ? JSON.stringify(w.idioms) : null,
+      isCompound: !!w.isCompound,
+      compoundParts: w.compoundParts ? JSON.stringify(w.compoundParts) : null,
+      detailJson: JSON.stringify({ nounTable, verbTable, adjectiveTable, examples }),
+    };
+    await prisma.word.upsert({ where: { lemma: word.lemma }, update: word, create: word });
+  }
+
+  // 3c. Graded reader stories
+  for (const [index, story] of SEED_STORIES.entries()) {
+    const row = {
+      slug: story.id,
+      title: story.title,
+      cefrLevel: story.cefrLevel,
+      coverEmoji: story.coverEmoji,
+      audioUrl: story.audioUrl ?? null,
+      paragraphsJson: JSON.stringify(story.paragraphs),
+      orderIndex: index,
+    };
+    await prisma.gradedStory.upsert({ where: { slug: row.slug }, update: row, create: row });
   }
 
   // 4. Seed Baseline Sample Sentences with Tokens

@@ -1,3 +1,4 @@
+import '../env.js';
 import { PrismaClient } from '@prisma/client';
 
 declare global {
@@ -5,12 +6,12 @@ declare global {
   var prismaGlobal: PrismaClient | undefined;
 }
 
+// Reuse one client per process. On serverless this matters: warm invocations
+// share the instance instead of opening a new pool against Neon each request.
 export const prisma =
   globalThis.prismaGlobal ??
   new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+    log: process.env.PRISMA_LOG_QUERIES === 'true' ? ['query', 'error', 'warn'] : ['error'],
   });
 
-if (process.env.NODE_ENV !== 'production') {
-  globalThis.prismaGlobal = prisma;
-}
+globalThis.prismaGlobal = prisma;

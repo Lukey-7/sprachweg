@@ -124,6 +124,42 @@ export const WordLookupResponseSchema = {
         perfekt3sg: { type: Type.STRING },
         konjunktiv2_3sg: { type: Type.STRING },
         imperativDu: { type: Type.STRING },
+        partizipII: { type: Type.STRING },
+        governedPreposition: { type: Type.STRING },
+        governedCase: { type: Type.STRING },
+        praesens: {
+          type: Type.OBJECT,
+          properties: {
+            ich: { type: Type.STRING },
+            du: { type: Type.STRING },
+            er_sie_es: { type: Type.STRING },
+            wir: { type: Type.STRING },
+            ihr: { type: Type.STRING },
+            sie_Sie: { type: Type.STRING },
+          },
+        },
+        praeteritum: {
+          type: Type.OBJECT,
+          properties: {
+            ich: { type: Type.STRING },
+            du: { type: Type.STRING },
+            er_sie_es: { type: Type.STRING },
+            wir: { type: Type.STRING },
+            ihr: { type: Type.STRING },
+            sie_Sie: { type: Type.STRING },
+          },
+        },
+      },
+    },
+    examples: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          de: { type: Type.STRING },
+          en: { type: Type.STRING },
+        },
+        required: ['de', 'en'],
       },
     },
   },
@@ -211,6 +247,13 @@ export interface GeminiGenerateOptions<T> {
   model?: string;
 }
 
+export class GeminiUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GeminiUnavailableError';
+  }
+}
+
 export class GeminiService {
   private client: GoogleGenAI | null = null;
   private isOfflineMockMode: boolean = false;
@@ -226,45 +269,51 @@ export class GeminiService {
     }
   }
 
+  /** True when responses are canned (no key, MOCK_GEMINI=true, or tests). */
+  public get isMockMode(): boolean {
+    return this.isOfflineMockMode || !this.client;
+  }
+
   public async generateStructured<T>(options: GeminiGenerateOptions<T>): Promise<T> {
+    // Mock responses ignore the input, so they are never cached: caching them
+    // would keep serving canned data for that input after a real key is added.
+    if (this.isMockMode) {
+      return this.generateOfflineMock<T>(options.prompt, options.responseSchema);
+    }
+
     const cacheType = options.cacheType || 'generic_gemini';
     const cacheInput = options.cacheKeyData || { prompt: options.prompt, systemInstruction: options.systemInstruction };
 
-    // 1. Check SQLite Hash-Keyed Cache
     const cached = await sqliteCache.get<T>(cacheType, cacheInput);
     if (cached) {
       return cached;
     }
 
-    // 2. Offline Fallback or Live API Call
     let resultPayload: T;
-    if (this.isOfflineMockMode || !this.client) {
-      resultPayload = this.generateOfflineMock<T>(options.prompt, options.responseSchema);
-    } else {
-      try {
-        const response = await this.client.models.generateContent({
-          model: options.model || 'gemini-2.5-flash',
-          contents: options.prompt,
-          config: {
-            systemInstruction: options.systemInstruction || GERMAN_LINGUISTIC_SYSTEM_PROMPT,
-            responseMimeType: 'application/json',
-            responseSchema: options.responseSchema as any,
-            temperature: options.temperature ?? 0.2,
-          },
-        });
+    try {
+      const response = await this.client!.models.generateContent({
+        model: options.model || process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+        contents: options.prompt,
+        config: {
+          systemInstruction: options.systemInstruction || GERMAN_LINGUISTIC_SYSTEM_PROMPT,
+          responseMimeType: 'application/json',
+          responseSchema: options.responseSchema as any,
+          temperature: options.temperature ?? 0.2,
+        },
+      });
 
-        const text = response.text;
-        if (!text) {
-          throw new Error('Gemini returned empty response text.');
-        }
-        resultPayload = JSON.parse(text) as T;
-      } catch (err: any) {
-        console.warn('Gemini API call failed, falling back to deterministic offline mock:', err?.message);
-        resultPayload = this.generateOfflineMock<T>(options.prompt, options.responseSchema);
+      const text = response.text;
+      if (!text) {
+        throw new Error('Gemini returned an empty response.');
       }
+      resultPayload = JSON.parse(text) as T;
+    } catch (err: any) {
+      // Surface the failure. Substituting mock data here would show the learner a
+      // confident analysis of a different sentence.
+      throw new GeminiUnavailableError(err?.message || 'Gemini request failed');
     }
 
-    // 3. Store in SQLite Cache
+    // Only successful live responses are cached.
     await sqliteCache.set<T>(cacheType, cacheInput, resultPayload);
     return resultPayload;
   }

@@ -276,7 +276,7 @@ describe('Milestone 1 Empirical Challenger & Adversarial Stress Suite', () => {
     });
 
     it('3.2 executes 50 concurrent card creation operations for the same user', async () => {
-      const user = await prisma.user.findFirst({ where: { email: 'guest@sprachweg.app' } });
+      const user = await prisma.user.findFirst({ where: { email: 'guest-user-001@sprachweg.local' } });
       expect(user).toBeDefined();
 
       const createPromises = Array.from({ length: 50 }, (_, i) =>
@@ -299,7 +299,7 @@ describe('Milestone 1 Empirical Challenger & Adversarial Stress Suite', () => {
     });
 
     it('3.3 executes 25 concurrent review submissions on the same card and verifies log fidelity', async () => {
-      const user = await prisma.user.findFirst({ where: { email: 'guest@sprachweg.app' } });
+      const user = await prisma.user.findFirst({ where: { email: 'guest-user-001@sprachweg.local' } });
       const testCard = await prisma.card.create({
         data: {
           userId: user!.id,
@@ -329,7 +329,7 @@ describe('Milestone 1 Empirical Challenger & Adversarial Stress Suite', () => {
     });
 
     it('3.4 executes 20 concurrent user settings updates without dirty state corruption', async () => {
-      const user = await prisma.user.findFirst({ where: { email: 'guest@sprachweg.app' } });
+      const user = await prisma.user.findFirst({ where: { email: 'guest-user-001@sprachweg.local' } });
 
       const patchPromises = Array.from({ length: 20 }, (_, i) =>
         request(app)
@@ -434,7 +434,7 @@ describe('Milestone 1 Empirical Challenger & Adversarial Stress Suite', () => {
     });
 
     it('4.2 verifies Sentence Cascade (tokens deleted) and SetNull (Card sentenceId set to null)', async () => {
-      const user = await prisma.user.findFirst({ where: { email: 'guest@sprachweg.app' } });
+      const user = await prisma.user.findFirst({ where: { email: 'guest-user-001@sprachweg.local' } });
       const sentence = await prisma.sentence.create({
         data: {
           textDe: 'Satz zum Löschen.',
@@ -481,7 +481,7 @@ describe('Milestone 1 Empirical Challenger & Adversarial Stress Suite', () => {
     });
 
     it('4.3 verifies Word Cascade (forms deleted) and SetNull (SentenceToken & Card wordId set to null)', async () => {
-      const user = await prisma.user.findFirst({ where: { email: 'guest@sprachweg.app' } });
+      const user = await prisma.user.findFirst({ where: { email: 'guest-user-001@sprachweg.local' } });
       const word = await prisma.word.create({
         data: {
           lemma: `adversarial-word-${Date.now()}`,

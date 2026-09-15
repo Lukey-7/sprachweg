@@ -1,8 +1,10 @@
-﻿import { Router, Request, Response } from 'express';
+import { geminiService, GeminiUnavailableError } from '../ai/geminiClient.js';
+import { Router, Request, Response } from 'express';
 import { SentenceMinerEngine } from '../miner/sentenceMiner.js';
 import { SentenceCardGenerator } from '../miner/variations.js';
 import { InterlinearGenerator } from '../miner/interlinear.js';
 import { parseSatzklammer } from '../linguistics/satzklammer.js';
+import { getUserId } from '../user.js';
 
 export const minerRouter = Router();
 
@@ -13,9 +15,9 @@ minerRouter.post('/analyze', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'sentence string is required' });
     }
     const analysis = await SentenceMinerEngine.analyzeSentence(sentence, level);
-    res.json({ analysis });
+    res.json({ analysis, mock: geminiService.isMockMode });
   } catch (error: any) {
-    res.status(500).json({ error: 'Sentence analysis failed', message: error?.message });
+    res.status(error instanceof GeminiUnavailableError ? 503 : 500).json({ error: 'Sentence analysis failed', message: error?.message });
   }
 });
 
@@ -30,7 +32,7 @@ minerRouter.post('/parse-topological', (req: Request, res: Response) => {
 
 minerRouter.post('/mine-card', async (req: Request, res: Response) => {
   try {
-    const userId = (req.headers['x-user-id'] as string) || 'guest-user-001';
+    const userId = getUserId(req);
     const { prompt, answer } = req.body;
     if (!prompt || !answer) {
       return res.status(400).json({ error: 'prompt and answer are required' });

@@ -1,6 +1,6 @@
-import { GrammarTopic, GradedStory, WordEntry } from '../types';
+// Curriculum content seeded into the database. The app reads it through the API.
 
-export const SEED_TOPICS: GrammarTopic[] = [
+export const SEED_TOPICS: any[] = [
   {
     id: 'topic-1',
     slug: 'nominativ-articles-gender',
@@ -331,7 +331,7 @@ In weak and mixed declensions, almost all Dative, Genitive, and Plural adjective
   }
 ];
 
-export const SEED_DICTIONARY: Record<string, WordEntry> = {
+export const SEED_DICTIONARY: Record<string, any> = {
   'geschwindigkeitsbegrenzung': {
     id: 'word-geschwindigkeitsbegrenzung',
     lemma: 'Geschwindigkeitsbegrenzung',
@@ -444,7 +444,7 @@ export const SEED_DICTIONARY: Record<string, WordEntry> = {
   }
 };
 
-export const SEED_STORIES: GradedStory[] = [
+export const SEED_STORIES: any[] = [
   {
     id: 'story-1',
     title: 'Ein Morgen in der Bäckerei',
@@ -472,8 +472,8 @@ export const SEED_STORIES: GradedStory[] = [
     coverEmoji: '🏛️',
     paragraphs: [
       {
-        textDe: 'Elena hat endlich einen Termin beim Bürgeramt in Berlin bekommen, um ihre neue Wohnung anzumelden.',
-        textEn: 'Elena finally secured an appointment at the Bürgeramt in Berlin to register her new apartment.'
+        textDe: 'Die Kursteilnehmerin hat endlich einen Termin beim Bürgeramt in Berlin bekommen, um ihre neue Wohnung anzumelden.',
+        textEn: 'The learner finally secured an appointment at the Bürgeramt in Berlin to register her new apartment.'
       },
       {
         textDe: 'Sie hat alle erforderlichen Unterlagen mitgebracht: den Reisepass, den Mietvertrag und die Wohnungsgeberbestätigung des Vermieters.',

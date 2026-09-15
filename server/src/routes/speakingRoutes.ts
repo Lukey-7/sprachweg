@@ -1,12 +1,13 @@
+import { getUserId } from '../user.js';
 import { Router, Request, Response } from 'express';
-import { geminiService, SpeakingEvaluationResponseSchema } from '../ai/geminiClient.js';
+import { geminiService, GeminiUnavailableError, SpeakingEvaluationResponseSchema } from '../ai/geminiClient.js';
 import { prisma } from '../db/prisma.js';
 
 export const speakingRouter = Router();
 
 speakingRouter.post('/evaluate', async (req: Request, res: Response) => {
   try {
-    const userId = (req.headers['x-user-id'] as string) || 'guest-user-001';
+    const userId = getUserId(req);
     const { mode, transcript, targetText, scenarioId } = req.body;
 
     const evaluation = await geminiService.generateStructured({
@@ -32,8 +33,8 @@ speakingRouter.post('/evaluate', async (req: Request, res: Response) => {
       },
     });
 
-    res.json({ evaluation, speakingSession });
+    res.json({ evaluation, speakingSession, mock: geminiService.isMockMode });
   } catch (error: any) {
-    res.status(500).json({ error: 'Speaking evaluation failed', message: error?.message });
+    res.status(error instanceof GeminiUnavailableError ? 503 : 500).json({ error: 'Speaking evaluation failed', message: error?.message });
   }
 });
