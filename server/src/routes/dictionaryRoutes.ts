@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db/prisma.js';
 import { geminiService, GeminiUnavailableError, WordLookupResponseSchema } from '../ai/geminiClient.js';
+import { normalizeGender, normalizePos, splitArticle } from '../linguistics/gender.js';
 
 export const dictionaryRouter = Router();
 
@@ -22,13 +23,23 @@ async function findWord(query: string) {
   });
 }
 
-/** Converts a Gemini lookup into the stored detail shape the app renders. */
-function toDetail(g: any) {
+/** Falls back to the article in the nominative singular form, e.g. "der Kühlschrank". */
+function genderFromTable(g: any): 'der' | 'die' | 'das' | null {
+  return splitArticle(String(g?.declensions?.nominativSg || '')).gender;
+}
+
+/**
+ * Converts a Gemini lookup into the stored detail shape the app renders. The response
+ * schema requires every field, so tables that don't apply arrive filled with empty
+ * strings (or guesses); only the table matching the part of speech is kept.
+ */
+export function toDetail(g: any, pos: string) {
   const d = g.declensions;
   const c = g.conjugations;
   const detail: Record<string, unknown> = {};
+  const filled = (obj: any) => !!obj && Object.values(obj).some(v => typeof v === 'string' && v.trim() !== '');
 
-  if (d?.nominativSg || d?.nominativPl) {
+  if (pos === 'noun' && (d?.nominativSg || d?.nominativPl)) {
     detail.nounTable = {
       nominativ: { sg: d.nominativSg || '', pl: d.nominativPl || '' },
       akkusativ: { sg: d.akkusativSg || '', pl: d.akkusativPl || '' },
@@ -36,7 +47,7 @@ function toDetail(g: any) {
       genitiv: { sg: d.genitivSg || '', pl: d.genitivPl || '' },
     };
   }
-  if (c?.praesens && c?.praeteritum) {
+  if (pos === 'verb' && filled(c?.praesens) && filled(c?.praeteritum)) {
     detail.verbTable = {
       praesens: c.praesens,
       praeteritum: c.praeteritum,
@@ -46,7 +57,8 @@ function toDetail(g: any) {
       ...(c.governedCase && { governedCase: c.governedCase.toLowerCase() }),
     };
   }
-  if (Array.isArray(g.examples) && g.examples.length) detail.examples = g.examples;
+  const examples = Array.isArray(g.examples) ? g.examples.filter((e: any) => e?.de) : [];
+  if (examples.length) detail.examples = examples;
   return detail;
 }
 
@@ -75,26 +87,30 @@ async function lookup(req: Request, res: Response, rawQuery: string) {
     }
 
     // Persist live lookups so the dictionary grows and repeat lookups are free.
-    const lemma = String(result.lemma || query).trim();
+    // Models sometimes include the article in the lemma ("der Kühlschrank").
+    const split = splitArticle(String(result.lemma || query));
+    const lemma = split.lemma;
+    const pos = normalizePos(result.pos);
+    const gender = normalizeGender(result.gender) ?? split.gender ?? (pos === 'noun' ? genderFromTable(result) : null);
     const word = await prisma.word.upsert({
       where: { lemma },
       update: {},
       create: {
         lemma,
         normalizedLemma: normalize(lemma),
-        pos: String(result.pos || 'noun').toLowerCase(),
-        gender: ['der', 'die', 'das'].includes(result.gender) ? result.gender : null,
+        pos,
+        gender,
         cefrLevel: result.cefrLevel || 'B1',
-        ipa: result.ipa,
+        ipa: result.ipa || null,
         meaningEn: result.meaningEn,
-        secondaryMeanings: result.secondaryMeanings ? JSON.stringify(result.secondaryMeanings) : null,
-        disambiguation: result.disambiguation,
-        falseFriends: result.falseFriends,
-        collocations: result.collocations ? JSON.stringify(result.collocations) : null,
-        idioms: result.idioms ? JSON.stringify(result.idioms) : null,
+        secondaryMeanings: result.secondaryMeanings?.length ? JSON.stringify(result.secondaryMeanings) : null,
+        disambiguation: result.disambiguation || null,
+        falseFriends: result.falseFriends || null,
+        collocations: result.collocations?.length ? JSON.stringify(result.collocations) : null,
+        idioms: result.idioms?.length ? JSON.stringify(result.idioms) : null,
         isCompound: !!result.isCompound,
-        compoundParts: result.compoundParts ? JSON.stringify(result.compoundParts) : null,
-        detailJson: JSON.stringify(toDetail(result)),
+        compoundParts: result.isCompound && result.compoundParts?.length ? JSON.stringify(result.compoundParts) : null,
+        detailJson: JSON.stringify(toDetail(result, pos)),
       },
       include: { forms: true },
     });

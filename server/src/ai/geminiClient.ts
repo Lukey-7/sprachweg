@@ -21,12 +21,13 @@ export const SentenceAnalysisResponseSchema = {
     textEnNatural: { type: Type.STRING },
     textEnLiteral: { type: Type.STRING },
     cefrLevel: { type: Type.STRING },
-    v2Position1: { type: Type.STRING },
-    v2Verb: { type: Type.STRING },
-    v2Mittelfeld: { type: Type.STRING },
-    v2VerbFinal: { type: Type.STRING },
-    isNebensatz: { type: Type.BOOLEAN },
-    conjunctionTrigger: { type: Type.STRING },
+    // Topological fields describe the MAIN clause. A leading subordinate clause fills the Vorfeld.
+    v2Position1: { type: Type.STRING, description: 'Vorfeld of the main clause (may be a whole subordinate clause).' },
+    v2Verb: { type: Type.STRING, description: 'Finite verb of the main clause (linke Satzklammer).' },
+    v2Mittelfeld: { type: Type.STRING, description: 'Mittelfeld of the main clause.' },
+    v2VerbFinal: { type: Type.STRING, description: 'Rechte Satzklammer of the main clause only (participle, infinitive, separable prefix). Empty if none. Never a verb from a subordinate clause.' },
+    isNebensatz: { type: Type.BOOLEAN, description: 'True if the sentence contains a subordinate clause.' },
+    conjunctionTrigger: { type: Type.STRING, description: 'The subordinating conjunction, if any.' },
     grammarTags: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
@@ -71,7 +72,7 @@ export const WordLookupResponseSchema = {
   properties: {
     lemma: { type: Type.STRING },
     pos: { type: Type.STRING },
-    gender: { type: Type.STRING },
+    gender: { type: Type.STRING, description: 'For nouns exactly one of: der, die, das. Empty for other parts of speech.' },
     cefrLevel: { type: Type.STRING },
     ipa: { type: Type.STRING },
     meaningEn: { type: Type.STRING },
@@ -200,9 +201,9 @@ export const DrillGenerationResponseSchema = {
 export const SpeakingEvaluationResponseSchema = {
   type: Type.OBJECT,
   properties: {
-    overallScore: { type: Type.NUMBER },
-    fluencyScore: { type: Type.NUMBER },
-    accuracyScore: { type: Type.NUMBER },
+    overallScore: { type: Type.NUMBER, description: 'Integer from 0 to 100.' },
+    fluencyScore: { type: Type.NUMBER, description: 'Integer from 0 to 100.' },
+    accuracyScore: { type: Type.NUMBER, description: 'Integer from 0 to 100.' },
     successes: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
@@ -225,8 +226,8 @@ export const SpeakingEvaluationResponseSchema = {
       items: {
         type: Type.OBJECT,
         properties: {
-          lemma: { type: Type.STRING },
-          gender: { type: Type.STRING },
+          lemma: { type: Type.STRING, description: 'Dictionary form without an article.' },
+          gender: { type: Type.STRING, description: 'For nouns exactly one of: der, die, das. Empty otherwise.' },
           meaningEn: { type: Type.STRING },
           exampleUsageDe: { type: Type.STRING },
         },
@@ -245,6 +246,56 @@ export interface GeminiGenerateOptions<T> {
   cacheType?: string;
   cacheKeyData?: string | object;
   model?: string;
+}
+
+export const PROMPT_VERSION = 3;
+
+/**
+ * gemini-2.5-flash is retired for new keys and capped at 20 free requests/day.
+ * Measured on this app's four tasks, gemini-3.5-flash-lite answered correctly in ~2-3s
+ * (gemini-3.5-flash: 8-24s and frequent "high demand" errors).
+ */
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
+
+/**
+ * Marks every property of a response schema as required. Lighter models silently omit
+ * optional nested objects (declension and conjugation tables); requiring them, with
+ * empty strings where a field doesn't apply, makes the output complete.
+ */
+export function requireAllFields<T>(schema: T): T {
+  const walk = (node: any): any => {
+    if (!node || typeof node !== 'object') return node;
+    const out: any = { ...node };
+    if (out.properties) {
+      out.properties = Object.fromEntries(Object.entries(out.properties).map(([k, v]) => [k, walk(v)]));
+      out.required = Object.keys(out.properties);
+    }
+    if (out.items) out.items = walk(out.items);
+    return out;
+  };
+  return walk(schema);
+}
+
+/** Upper bound for one Gemini call; a stalled generation becomes a retryable error. */
+const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS) || 25_000; // under the 30s Vercel function limit
+const GEMINI_THINKING_BUDGET = Number(process.env.GEMINI_THINKING_BUDGET ?? 512);
+
+/** Short, learner-readable reason for a failed Gemini call (the raw error is a JSON blob). */
+export function describeGeminiError(err: any): string {
+  if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+    return `The AI took longer than ${GEMINI_TIMEOUT_MS / 1000}s.`;
+  }
+  const raw = String(err?.message ?? '');
+  if (/RESOURCE_EXHAUSTED|quota|429/i.test(raw)) {
+    const perDay = /PerDay/i.test(raw);
+    const limit = raw.match(/quotaValue\\?"\s*:\s*\\?"(\d+)/)?.[1];
+    return perDay
+      ? `Daily AI limit reached${limit ? ` (${limit} requests/day on the free tier)` : ''}. It resets at midnight Pacific time.`
+      : 'Too many AI requests in a short time. Wait a minute and try again.';
+  }
+  if (/high demand|UNAVAILABLE|503/i.test(raw)) return 'The AI service is busy right now. Try again in a moment.';
+  if (/API key|PERMISSION_DENIED|403|401/i.test(raw)) return 'The Gemini API key was rejected. Check GEMINI_API_KEY.';
+  return raw.match(/"message"\s*:\s*"([^"]{1,200})/)?.[1] ?? (raw.slice(0, 200) || 'AI request failed.');
 }
 
 export class GeminiUnavailableError extends Error {
@@ -281,7 +332,9 @@ export class GeminiService {
       return this.generateOfflineMock<T>(options.prompt, options.responseSchema);
     }
 
-    const cacheType = options.cacheType || 'generic_gemini';
+    // Versioned so that prompt or schema changes don't keep serving answers produced by
+    // the old ones. Bump PROMPT_VERSION whenever a prompt or response schema changes.
+    const cacheType = `${options.cacheType || 'generic_gemini'}:v${PROMPT_VERSION}`;
     const cacheInput = options.cacheKeyData || { prompt: options.prompt, systemInstruction: options.systemInstruction };
 
     const cached = await sqliteCache.get<T>(cacheType, cacheInput);
@@ -289,16 +342,22 @@ export class GeminiService {
       return cached;
     }
 
+    const model = options.model || process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
     let resultPayload: T;
     try {
       const response = await this.client!.models.generateContent({
-        model: options.model || process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+        model,
         contents: options.prompt,
         config: {
           systemInstruction: options.systemInstruction || GERMAN_LINGUISTIC_SYSTEM_PROMPT,
           responseMimeType: 'application/json',
-          responseSchema: options.responseSchema as any,
+          responseSchema: requireAllFields(options.responseSchema) as any,
           temperature: options.temperature ?? 0.2,
+          // gemini-2.5 models stall on these schemas with no thinking and occasionally with
+          // unbounded thinking; a small fixed budget was reliable. Newer models are fast as-is.
+          ...(/2\.5/.test(model) && { thinkingConfig: { thinkingBudget: GEMINI_THINKING_BUDGET } }),
+          maxOutputTokens: 8192,
+          abortSignal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
         },
       });
 
@@ -310,7 +369,7 @@ export class GeminiService {
     } catch (err: any) {
       // Surface the failure. Substituting mock data here would show the learner a
       // confident analysis of a different sentence.
-      throw new GeminiUnavailableError(err?.message || 'Gemini request failed');
+      throw new GeminiUnavailableError(describeGeminiError(err));
     }
 
     // Only successful live responses are cached.

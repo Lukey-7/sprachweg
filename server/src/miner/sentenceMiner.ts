@@ -1,6 +1,12 @@
-﻿import { SentenceAnalysis, TokenGrammar, Gender, GermanCase, POS, TopologicalField, TeKaMoLo, VariationItem } from './types.js';
+import { SentenceAnalysis, TokenGrammar, Gender, GermanCase, POS, TopologicalField, TeKaMoLo, VariationItem } from './types.js';
 import { parseSatzklammer } from '../linguistics/satzklammer.js';
 import { geminiService, SentenceAnalysisResponseSchema } from '../ai/geminiClient.js';
+import { normalizePos } from '../linguistics/gender.js';
+
+const POS_TAGS: Record<string, string> = {
+  noun: 'NOUN', verb: 'VERB', adjective: 'ADJ', adverb: 'ADV', article: 'ART',
+  preposition: 'PREP', pronoun: 'PRON', conjunction: 'CONJ', particle: 'PART',
+};
 
 export class SentenceMinerEngine {
   public static async analyzeSentence(sentenceDe: string, level: string = 'auto'): Promise<SentenceAnalysis> {
@@ -14,15 +20,17 @@ export class SentenceMinerEngine {
       cacheKeyData: { sentence: cleanSentence, level },
     });
 
-    // 2. Validate topological fields with deterministic Satzklammer parser
+    // 2. Deterministic Satzklammer parse, used when the AI analysis isn't trustworthy
     const topo = parseSatzklammer(cleanSentence);
+    const trustAi = !geminiService.isMockMode && !!aiAnalysis.v2Verb;
 
     // 3. Normalize tokens
     let tokens: TokenGrammar[] = [];
     if (aiAnalysis.tokens && Array.isArray(aiAnalysis.tokens) && aiAnalysis.tokens.length > 0) {
       tokens = aiAnalysis.tokens.map((t: any, index: number) => {
         const rawToken = t.surfaceToken || t.token || '';
-        const rawPos = (t.pos || 'OTHER').toUpperCase();
+        // Models answer in English or German ("Nomen", "Adjektiv"); normalise before mapping.
+        const rawPos = POS_TAGS[normalizePos(t.pos)] ?? (t.pos || 'OTHER').toUpperCase();
         let pos: POS = 'OTHER';
         if (['NOUN', 'VERB', 'ADJ', 'ADV', 'ART', 'PREP', 'PRON', 'CONJ', 'PART'].includes(rawPos)) {
           pos = rawPos as POS;
@@ -110,15 +118,26 @@ export class SentenceMinerEngine {
       sentenceEnLiteral: literalEn,
       textEnLiteral: literalEn,
       tokens,
-      topologicalMap: {
-        vorfeld: topo.vorfeld || aiAnalysis.v2Position1 || '',
-        linkeSatzklammer: topo.linkeSatzklammer || aiAnalysis.v2Verb || '',
-        mittelfeld: topo.mittelfeld || aiAnalysis.v2Mittelfeld || '',
-        rechteSatzklammer: topo.rechteSatzklammer || aiAnalysis.v2VerbFinal || '',
-        nachfeld: topo.nachfeld || '',
-      },
-      isNebensatz: topo.isNebensatz,
-      conjunctionTrigger: topo.conjunctionTrigger,
+      // A live model analysis beats the rule-based parser, which misreads sentences that
+      // open with a subordinate clause. The parser still covers mock mode, where the
+      // canned analysis belongs to a different sentence.
+      topologicalMap: trustAi
+        ? {
+            vorfeld: aiAnalysis.v2Position1 ?? '',
+            linkeSatzklammer: aiAnalysis.v2Verb ?? '',
+            mittelfeld: aiAnalysis.v2Mittelfeld ?? '',
+            rechteSatzklammer: aiAnalysis.v2VerbFinal ?? '',
+            nachfeld: topo.nachfeld || '',
+          }
+        : {
+            vorfeld: topo.vorfeld || aiAnalysis.v2Position1 || '',
+            linkeSatzklammer: topo.linkeSatzklammer || aiAnalysis.v2Verb || '',
+            mittelfeld: topo.mittelfeld || aiAnalysis.v2Mittelfeld || '',
+            rechteSatzklammer: topo.rechteSatzklammer || aiAnalysis.v2VerbFinal || '',
+            nachfeld: topo.nachfeld || '',
+          },
+      isNebensatz: trustAi && typeof aiAnalysis.isNebensatz === 'boolean' ? aiAnalysis.isNebensatz : topo.isNebensatz,
+      conjunctionTrigger: (trustAi && aiAnalysis.conjunctionTrigger) || topo.conjunctionTrigger,
       grammarTags: aiAnalysis.grammarTags || [],
       cefrLevel: (aiAnalysis.cefrLevel || 'A2').toUpperCase() as any,
       variations,

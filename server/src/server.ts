@@ -88,8 +88,16 @@ const PORT = process.env.PORT || 4000;
 
 if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.js')) {
   const app = createServer();
-  app.listen(PORT, () => {
+  const httpServer = app.listen(PORT, () => {
     console.log(`Sprachweg Backend Server running at http://localhost:${PORT}`);
     console.log(`Healthcheck available at http://localhost:${PORT}/api/health`);
+  });
+  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      // Otherwise an old server on the same port keeps answering with stale code and settings.
+      console.error(`Port ${PORT} is already in use, probably by an earlier Sprachweg server. Stop it and try again.`);
+      process.exit(1);
+    }
+    throw err;
   });
 }

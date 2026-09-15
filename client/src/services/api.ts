@@ -221,7 +221,7 @@ export function toSpeakingDebrief(e: any): SpeakingDebrief {
       rule: c.ruleExplanation,
     })),
     minedWords: (e.minedVocabulary ?? []).map((w: any) => ({
-      word: w.gender ? `${w.gender} ${w.lemma}` : w.lemma,
+      word: w.gender && !/^(der|die|das)\s/i.test(w.lemma) ? `${w.gender} ${w.lemma}` : w.lemma,
       pos: w.gender ? 'noun' : 'word',
       gender: w.gender ?? undefined,
       meaning: w.meaningEn,

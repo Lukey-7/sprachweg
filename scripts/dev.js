@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -25,12 +25,30 @@ const client = spawn(npmCmd, ['--prefix', 'client', 'run', 'dev'], {
   shell: true,
 });
 
-const cleanup = () => {
-  console.log('\nShutting down Sprachweg servers...');
-  server.kill();
-  client.kill();
-  process.exit();
+// On Windows, killing the npm shell leaves its node children running (and holding
+// the ports), so the whole process tree is terminated.
+const killTree = child => {
+  if (!child.pid || child.exitCode !== null) return;
+  // Synchronous so the tree is gone before this process exits.
+  if (isWin) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  else child.kill('SIGTERM');
 };
+
+let shuttingDown = false;
+const cleanup = code => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log('\nShutting down Sprachweg servers...');
+  killTree(server);
+  killTree(client);
+  process.exit(typeof code === 'number' ? code : 0);
+};
+
+// If either side's process exits, stop the other instead of leaving a half-running app.
+// (tsx watch keeps running after the server crashes, e.g. on a busy port, so that case
+// is reported by the server's own error message instead.)
+server.on('exit', code => cleanup(code ?? 1));
+client.on('exit', code => cleanup(code ?? 1));
 
 process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);

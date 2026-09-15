@@ -19,7 +19,7 @@ Everything you do is saved: cards, reviews, streak, grammar mastery, daily progr
 | Client | React 18, Vite, Tailwind, TanStack Query, vite-plugin-pwa |
 | Server | Express (runs as a single Vercel function in production) |
 | Database | Postgres via Prisma (Neon in production) |
-| AI | Google Gemini (`gemini-2.5-flash`), server-side only |
+| AI | Google Gemini (`gemini-3.5-flash-lite`), server-side only |
 
 ```
 client/   React app (PWA)
@@ -53,7 +53,7 @@ canned sample data, and the app labels it as such.
 | `DIRECT_URL` | yes | Neon **direct** connection string, used for `db:push` |
 | `GEMINI_API_KEY` | for AI | From [Google AI Studio](https://aistudio.google.com/apikey) |
 | `MOCK_GEMINI` | no | `true` = never call Gemini |
-| `GEMINI_MODEL` | no | Override the model, default `gemini-2.5-flash` |
+| `GEMINI_MODEL` | no | Override the model, default `gemini-3.5-flash-lite` |
 | `SPRACHWEG_USER_ID` | no | Your learner id, default `me`. Changing it starts a fresh profile. |
 | `TEST_DATABASE_URL` | tests only | A database the tests may **delete everything** in |
 
